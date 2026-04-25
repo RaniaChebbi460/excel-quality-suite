@@ -1,4 +1,3 @@
-import { create } from "zustand";
 import type { ParsedFile } from "@/lib/excel";
 
 // minimal store without external dep
@@ -58,7 +57,3 @@ export const appActions = {
   },
 };
 
-// fake `create` to avoid zustand runtime dependency since we wrote our own
-function create<T>(_: any): any {
-  return null;
-}
