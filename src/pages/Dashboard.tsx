@@ -1,12 +1,13 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SectionCard } from "@/components/dashboard/SectionCard";
 import { ControlChart } from "@/components/charts/ControlChart";
 import { Button } from "@/components/ui/button";
-import { Trash2, RefreshCw, CheckCircle2, AlertTriangle, BarChart3 } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Wand2, Database } from "lucide-react";
 import { useAppStore, appActions } from "@/store/app-store";
-import { DEMO_SUBGROUPS, DEMO_SPEC, DEMO_MSA } from "@/lib/demo-data";
+import { DEMO_SUBGROUPS, DEMO_MSA } from "@/lib/demo-data";
 import {
   computeXbarR,
   computeCapability,
@@ -14,9 +15,9 @@ import {
   buildHistogram,
   normalPdf,
   mean,
+  MSAEntry,
 } from "@/lib/spc-engine";
 import {
-  BarChart,
   Bar,
   XAxis,
   YAxis,
@@ -33,50 +34,107 @@ import {
 } from "recharts";
 
 const Dashboard = () => {
-  // For now, the dashboard runs on demo data. Real data flow goes through /data → analysis pages.
-  const subgroups = DEMO_SUBGROUPS;
+  const specs = useAppStore((s) => s.specs);
+  const mapping = useAppStore((s) => s.mapping);
+  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const filesCount = useAppStore((s) => s.files.length);
+
+  // Build subgroups from mapping; fall back to demo
+  const { subgroups, isUsingRealData } = useMemo(() => {
+    if (sheet && mapping.measureCols.length > 0) {
+      if (mapping.measureCols.length >= 2) {
+        // multi-column = direct subgroups
+        const groups = sheet.rows
+          .map((r) => mapping.measureCols.map((c) => Number(r[c])))
+          .filter((row) => row.every((v) => !isNaN(v)));
+        if (groups.length > 0) return { subgroups: groups, isUsingRealData: true };
+      } else {
+        // single column → split into subgroups of size n
+        const col = mapping.measureCols[0];
+        const flat = sheet.rows.map((r) => Number(r[col])).filter((v) => !isNaN(v));
+        const n = Math.max(2, Math.min(10, specs.subgroupSize));
+        const groups: number[][] = [];
+        for (let i = 0; i + n <= flat.length; i += n) groups.push(flat.slice(i, i + n));
+        if (groups.length > 0) return { subgroups: groups, isUsingRealData: true };
+      }
+    }
+    return { subgroups: DEMO_SUBGROUPS, isUsingRealData: false };
+  }, [sheet, mapping.measureCols, specs.subgroupSize]);
+
   const flatValues = useMemo(() => subgroups.flat(), [subgroups]);
 
   const spc = useMemo(() => computeXbarR(subgroups), [subgroups]);
   const cap = useMemo(
-    () => computeCapability(flatValues, DEMO_SPEC.lsl, DEMO_SPEC.usl, DEMO_SPEC.target, 5),
-    [flatValues]
+    () => computeCapability(flatValues, specs.lsl, specs.usl, specs.target, specs.subgroupSize),
+    [flatValues, specs]
   );
-  const msa = useMemo(() => computeMSA(DEMO_MSA), []);
+
+  // MSA from mapping if all 3 cols present, else demo
+  const msaEntries = useMemo<MSAEntry[]>(() => {
+    if (sheet && mapping.partCol && mapping.operatorCol && mapping.valueCol) {
+      return sheet.rows
+        .map((r, i) => ({
+          part: r[mapping.partCol!] ?? "",
+          operator: r[mapping.operatorCol!] ?? "",
+          trial: mapping.trialCol ? Number(r[mapping.trialCol]) : i,
+          value: Number(r[mapping.valueCol!]),
+        }))
+        .filter((e) => e.part !== "" && e.operator !== "" && !isNaN(e.value));
+    }
+    return DEMO_MSA;
+  }, [sheet, mapping]);
+
+  const msa = useMemo(() => computeMSA(msaEntries.length > 0 ? msaEntries : DEMO_MSA), [msaEntries]);
 
   const isInControl = spc.outOfControl.length === 0;
-
-  // tiny trend arrays for KPI cards
   const trendMean = spc.subgroupMeans;
   const trendRange = spc.subgroupRanges;
-  const trendCpk = Array.from({ length: 16 }, (_, i) => 1 + Math.sin(i * 0.6) * 0.2 + 0.3);
-  const trendPpk = Array.from({ length: 16 }, (_, i) => 1 + Math.cos(i * 0.5) * 0.15 + 0.2);
-  const trendU = Array.from({ length: 18 }, (_, i) => 0.005 + Math.sin(i * 0.4) * 0.002);
+  const trendCpk = trendMean.map((m) => Math.abs(cap.cpk + (m - cap.mean) * 5));
+  const trendPpk = trendMean.map((m) => Math.abs(cap.ppk + (m - cap.mean) * 4));
+  const uVal = cap.stdLongTerm > 0 ? (cap.stdLongTerm / Math.sqrt(flatValues.length)) * 2 : 0;
+  const trendU = trendMean.map(() => uVal);
 
-  // Histogram data
   const hist = useMemo(() => {
     const h = buildHistogram(flatValues, 18);
-    const sigma = cap.stdLongTerm;
-    const maxCount = Math.max(...h.map((d) => d.count));
+    const sigma = cap.stdLongTerm || 0.001;
+    const maxCount = Math.max(...h.map((d) => d.count), 1);
     const maxPdf = normalPdf(cap.mean, cap.mean, sigma);
     return h.map((d) => ({
       ...d,
-      pdf: (normalPdf(d.bin, cap.mean, sigma) / maxPdf) * maxCount,
+      pdf: maxPdf > 0 ? (normalPdf(d.bin, cap.mean, sigma) / maxPdf) * maxCount : 0,
     }));
   }, [flatValues, cap]);
 
-  // MSA pie
   const msaPie = [
     { name: `EV (${msa.evPct.toFixed(1)}%)`, value: msa.evPct, color: "hsl(var(--primary))" },
     { name: `AV (${msa.avPct.toFixed(1)}%)`, value: msa.avPct, color: "hsl(var(--purple))" },
     { name: `PV (${msa.pvPct.toFixed(1)}%)`, value: msa.pvPct, color: "hsl(var(--success))" },
   ];
 
-  // Subgroup table (first 5)
   const tableRows = subgroups.slice(0, 5);
 
   return (
-    <AppLayout title="Tableau de bord" subtitle="Vue d'ensemble du processus">
+    <AppLayout
+      title={`Tableau de bord — ${specs.projectName}`}
+      subtitle={isUsingRealData ? "Données importées en direct" : "Vue d'ensemble (données de démonstration)"}
+    >
+      {!isUsingRealData && (
+        <div className="mb-5 px-4 py-3 rounded-lg bg-info/10 border border-info/30 flex items-center justify-between gap-3">
+          <div className="text-sm text-info flex items-center gap-2">
+            <Database className="w-4 h-4" />
+            {filesCount === 0
+              ? "Aucun fichier importé. Le tableau de bord affiche des données de démonstration."
+              : "Mappage des colonnes incomplet. Lancez l'assistant pour utiliser vos données importées."}
+          </div>
+          <Link to="/data">
+            <Button size="sm" className="gap-1.5">
+              <Wand2 className="w-3.5 h-3.5" />
+              {filesCount === 0 ? "Importer des données" : "Configurer le mappage"}
+            </Button>
+          </Link>
+        </div>
+      )}
+
       {/* KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-5">
         <div className="bg-card rounded-xl border border-border shadow-card p-4 flex flex-col gap-2">
@@ -98,11 +156,11 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <KpiCard label="Moyenne globale (X̄)" value={cap.mean.toFixed(3)} unit="mm" accent="success" trend={trendMean} />
-        <KpiCard label="Écart type global (σ)" value={cap.stdLongTerm.toFixed(3)} unit="mm" accent="info" trend={trendRange} />
-        <KpiCard label="Pp" value={cap.pp.toFixed(2)} subtitle="Process Performance" accent="primary" trend={trendCpk} trendType="bar" />
-        <KpiCard label="Ppk" value={cap.ppk.toFixed(2)} subtitle="Performance réelle" accent="purple" trend={trendPpk} trendType="bar" />
-        <KpiCard label="Incertitude (U)" value={cap.stdLongTerm > 0 ? (cap.stdLongTerm / Math.sqrt(flatValues.length) * 2).toFixed(4) : "-"} unit="mm" accent="orange" trend={trendU} />
+        <KpiCard label="Moyenne globale (X̄)" value={cap.mean.toFixed(3)} unit={specs.unit} accent="success" trend={trendMean} />
+        <KpiCard label="Écart type global (σ)" value={cap.stdLongTerm.toFixed(3)} unit={specs.unit} accent="info" trend={trendRange} />
+        <KpiCard label="Cpk" value={cap.cpk.toFixed(2)} subtitle="Capabilité court terme" accent="primary" trend={trendCpk} trendType="bar" />
+        <KpiCard label="Ppk" value={cap.ppk.toFixed(2)} subtitle="Performance long terme" accent="purple" trend={trendPpk} trendType="bar" />
+        <KpiCard label="Incertitude (U)" value={uVal.toFixed(4)} unit={specs.unit} accent="orange" trend={trendU} />
       </div>
 
       {/* Row: data table + control charts */}
@@ -138,10 +196,7 @@ const Dashboard = () => {
             <div className="text-xs text-muted-foreground space-y-1">
               <div>Total sous-groupes : <span className="font-semibold text-foreground">{subgroups.length}</span></div>
               <div>Taille du sous-groupe : <span className="font-semibold text-foreground">{spc.n}</span></div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5"><Trash2 className="w-3.5 h-3.5" />Effacer</Button>
-              <Button size="sm" className="gap-1.5"><RefreshCw className="w-3.5 h-3.5" />Recalculer</Button>
+              <div>Source : <span className="font-semibold text-foreground">{isUsingRealData ? "Fichier importé" : "Démo"}</span></div>
             </div>
           </div>
         </SectionCard>
@@ -173,11 +228,11 @@ const Dashboard = () => {
         <SectionCard title="3. Capabilité Process">
           <div className="grid grid-cols-3 gap-4">
             <div className="col-span-1 space-y-2 text-sm">
-              <Spec label="USL (Limite sup.)" value={`${cap.usl.toFixed(2)} mm`} />
-              <Spec label="LSL (Limite inf.)" value={`${cap.lsl.toFixed(2)} mm`} />
-              <Spec label="Cible (Target)" value={`${cap.target?.toFixed(2)} mm`} />
-              <Spec label="Moyenne (X̄)" value={`${cap.mean.toFixed(3)} mm`} />
-              <Spec label="Écart type (σ)" value={`${cap.stdLongTerm.toFixed(3)} mm`} />
+              <Spec label="USL (Limite sup.)" value={`${specs.usl.toFixed(2)} ${specs.unit}`} />
+              <Spec label="LSL (Limite inf.)" value={`${specs.lsl.toFixed(2)} ${specs.unit}`} />
+              <Spec label="Cible (Target)" value={`${specs.target.toFixed(2)} ${specs.unit}`} />
+              <Spec label="Moyenne (X̄)" value={`${cap.mean.toFixed(3)} ${specs.unit}`} />
+              <Spec label="Écart type (σ)" value={`${cap.stdLongTerm.toFixed(3)} ${specs.unit}`} />
             </div>
             <div className="col-span-1 h-44">
               <ResponsiveContainer>
@@ -186,9 +241,9 @@ const Dashboard = () => {
                   <XAxis dataKey="label" tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" />
                   <YAxis tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" />
                   <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", fontSize: 11 }} />
-                  <ReferenceLine x={cap.lsl.toFixed(2)} stroke="hsl(var(--destructive))" strokeDasharray="3 3" label={{ value: "LSL", fill: "hsl(var(--destructive))", fontSize: 10 }} />
-                  <ReferenceLine x={cap.usl.toFixed(2)} stroke="hsl(var(--destructive))" strokeDasharray="3 3" label={{ value: "USL", fill: "hsl(var(--destructive))", fontSize: 10 }} />
-                  <ReferenceLine x={cap.target?.toFixed(2)} stroke="hsl(var(--success))" strokeDasharray="3 3" label={{ value: "Cible", fill: "hsl(var(--success))", fontSize: 10 }} />
+                  <ReferenceLine x={specs.lsl.toFixed(2)} stroke="hsl(var(--destructive))" strokeDasharray="3 3" label={{ value: "LSL", fill: "hsl(var(--destructive))", fontSize: 10 }} />
+                  <ReferenceLine x={specs.usl.toFixed(2)} stroke="hsl(var(--destructive))" strokeDasharray="3 3" label={{ value: "USL", fill: "hsl(var(--destructive))", fontSize: 10 }} />
+                  <ReferenceLine x={specs.target.toFixed(2)} stroke="hsl(var(--success))" strokeDasharray="3 3" label={{ value: "Cible", fill: "hsl(var(--success))", fontSize: 10 }} />
                   <Bar dataKey="count" fill="hsl(var(--primary))" opacity={0.8} radius={[2, 2, 0, 0]} />
                   <Line type="monotone" dataKey="pdf" stroke="hsl(var(--purple))" strokeWidth={2} dot={false} />
                 </ComposedChart>
@@ -205,13 +260,13 @@ const Dashboard = () => {
 
         <SectionCard title="4. Incertitude de mesure">
           <div className="grid grid-cols-2 gap-4 items-center">
-            <UncertaintyGauge value={cap.stdLongTerm / Math.sqrt(flatValues.length) * 2} max={0.02} />
+            <UncertaintyGauge value={uVal} max={Math.max(uVal * 2, 0.02)} />
             <div className="space-y-2 text-sm">
               <Spec label="Type d'incertitude" value="Type A" />
               <Spec label="N (mesures)" value={String(flatValues.length)} />
-              <Spec label="Écart type (s)" value={cap.stdLongTerm.toFixed(3) + " mm"} />
-              <Spec label="Incertitude (u)" value={(cap.stdLongTerm / Math.sqrt(flatValues.length)).toFixed(4) + " mm"} />
-              <Spec label="Incertitude élargie (U)" value={(cap.stdLongTerm / Math.sqrt(flatValues.length) * 2).toFixed(4) + " mm"} />
+              <Spec label="Écart type (s)" value={cap.stdLongTerm.toFixed(4) + " " + specs.unit} />
+              <Spec label="Incertitude (u)" value={(uVal / 2).toFixed(5) + " " + specs.unit} />
+              <Spec label="Incertitude élargie (U)" value={uVal.toFixed(5) + " " + specs.unit} />
               <Spec label="Facteur k" value="2" />
             </div>
           </div>
@@ -275,17 +330,22 @@ const Dashboard = () => {
                   <Row label="Tendance / règles SPC" value={spc.westernElectric.length === 0 ? "Aucune anomalie" : `${spc.westernElectric.length} alerte(s)`} ok={spc.westernElectric.length === 0} />
                   <Row label="Capabilité (Cpk ≥ 1.33)" value={cap.cpk.toFixed(2)} ok={cap.cpk >= 1.33} warn={cap.cpk >= 1 && cap.cpk < 1.33} />
                   <Row label="MSA (%GRR ≤ 30%)" value={`${msa.grrPct.toFixed(1)}%`} ok={msa.grrPct < 10} warn={msa.grrPct >= 10 && msa.grrPct <= 30} />
-                  <Row label="Incertitude" value={(cap.stdLongTerm / Math.sqrt(flatValues.length) * 2).toFixed(4)} ok />
+                  <Row label="Incertitude" value={uVal.toFixed(4)} ok />
                 </tbody>
               </table>
             </div>
-            <div className="bg-success/10 border border-success/30 rounded-lg p-3 flex flex-col items-center text-center gap-2">
-              <div className="text-xs font-semibold text-success uppercase tracking-wider">Conclusion</div>
+            <div className={`rounded-lg p-3 flex flex-col items-center text-center gap-2 border ${isInControl && cap.cpk >= 1.33 ? "bg-success/10 border-success/30" : "bg-warning/10 border-warning/30"}`}>
+              <div className={`text-xs font-semibold uppercase tracking-wider ${isInControl && cap.cpk >= 1.33 ? "text-success" : "text-warning"}`}>Conclusion</div>
               <p className="text-xs text-foreground/80 leading-relaxed">
-                Le processus est globalement {isInControl ? "sous contrôle" : "à surveiller"}. La capabilité et le système de mesure peuvent être améliorés pour atteindre les objectifs.
+                Le processus est globalement {isInControl ? "sous contrôle" : "à surveiller"}.
+                {cap.cpk < 1.33 && " La capabilité doit être améliorée."}
               </p>
-              <div className="w-12 h-12 rounded-full bg-success flex items-center justify-center">
-                <CheckCircle2 className="w-7 h-7 text-success-foreground" />
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isInControl && cap.cpk >= 1.33 ? "bg-success" : "bg-warning"}`}>
+                {isInControl && cap.cpk >= 1.33 ? (
+                  <CheckCircle2 className="w-7 h-7 text-success-foreground" />
+                ) : (
+                  <AlertTriangle className="w-7 h-7 text-warning-foreground" />
+                )}
               </div>
             </div>
           </div>
@@ -335,21 +395,26 @@ const Row = ({ label, value, ok, warn }: { label: string; value: string; ok?: bo
 
 const UncertaintyGauge = ({ value, max }: { value: number; max: number }) => {
   const pct = Math.min(100, (value / max) * 100);
-  const angle = -90 + (pct / 100) * 180;
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative w-44 h-24 overflow-hidden">
-        <div className="absolute inset-0 rounded-t-full" style={{
-          background: "conic-gradient(from 270deg, hsl(var(--success)) 0deg, hsl(var(--warning)) 90deg, hsl(var(--destructive)) 180deg, transparent 180deg)",
-        }} />
-        <div className="absolute inset-2 rounded-t-full bg-card" />
-        <div className="absolute left-1/2 bottom-0 w-1 h-20 bg-foreground origin-bottom rounded-full transition-transform" style={{ transform: `translateX(-50%) rotate(${angle}deg)` }} />
-        <div className="absolute left-1/2 bottom-0 w-3 h-3 bg-foreground rounded-full -translate-x-1/2 translate-y-1/2" />
-      </div>
-      <div className="text-center mt-2">
-        <div className="text-xs text-muted-foreground uppercase tracking-wider">U</div>
-        <div className="text-2xl font-bold text-orange">{value.toFixed(4)}</div>
-        <div className="text-xs text-muted-foreground">mm</div>
+    <div className="flex flex-col items-center justify-center">
+      <div className="relative w-32 h-32">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="40" stroke="hsl(var(--border))" strokeWidth="10" fill="none" />
+          <circle
+            cx="50"
+            cy="50"
+            r="40"
+            stroke="hsl(var(--orange))"
+            strokeWidth="10"
+            fill="none"
+            strokeDasharray={`${(pct / 100) * 251.3} 251.3`}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="text-2xl font-bold text-orange tabular-nums">{value.toFixed(4)}</div>
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">U élargie</div>
+        </div>
       </div>
     </div>
   );

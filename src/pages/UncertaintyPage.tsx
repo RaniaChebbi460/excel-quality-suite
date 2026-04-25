@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
-import { useAppStore } from "@/store/app-store";
+import { useAppStore, appActions } from "@/store/app-store";
 import { computeUncertaintyTypeA, combineUncertainties, UncertaintyComponent } from "@/lib/spc-engine";
 import { DEMO_SUBGROUPS } from "@/lib/demo-data";
 import { Input } from "@/components/ui/input";
@@ -10,16 +10,15 @@ import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 
 const UncertaintyPage = () => {
-  const files = useAppStore((s) => s.files);
-  const activeFileIndex = useAppStore((s) => s.activeFileIndex);
-  const activeSheetIndex = useAppStore((s) => s.activeSheetIndex);
-  const sheet = activeFileIndex !== null && activeSheetIndex !== null ? files[activeFileIndex]?.sheets[activeSheetIndex] : null;
-  const [selectedCol, setSelectedCol] = useState<string | null>(null);
+  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const mapping = useAppStore((s) => s.mapping);
+  const [overrideCol, setOverrideCol] = useState<string | null>(null);
 
   const values = useMemo(() => {
-    if (sheet && selectedCol) return sheet.rows.map((r) => Number(r[selectedCol])).filter((v) => !isNaN(v));
+    const col = overrideCol ?? mapping.measureCols[0];
+    if (sheet && col) return sheet.rows.map((r) => Number(r[col])).filter((v) => !isNaN(v));
     return DEMO_SUBGROUPS.flat();
-  }, [sheet, selectedCol]);
+  }, [sheet, overrideCol, mapping.measureCols]);
 
   const [k, setK] = useState(2);
   const [components, setComponents] = useState<UncertaintyComponent[]>([
@@ -43,7 +42,7 @@ const UncertaintyPage = () => {
           {sheet && (
             <div className="mb-3">
               <Label className="text-xs">Colonne</Label>
-              <select value={selectedCol ?? ""} onChange={(e) => setSelectedCol(e.target.value || null)} className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm">
+              <select value={overrideCol ?? ""} onChange={(e) => setOverrideCol(e.target.value || null)} className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm">
                 <option value="">— Démo —</option>
                 {sheet.headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>

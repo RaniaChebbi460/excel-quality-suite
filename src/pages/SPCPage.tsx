@@ -1,65 +1,52 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
 import { ControlChart } from "@/components/charts/ControlChart";
-import { useAppStore } from "@/store/app-store";
+import { useAppStore, appActions } from "@/store/app-store";
 import { computeXbarR, computeXbarS, computeIMR } from "@/lib/spc-engine";
 import { DEMO_SUBGROUPS } from "@/lib/demo-data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Wand2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
 const SPCPage = () => {
-  const files = useAppStore((s) => s.files);
-  const activeFileIndex = useAppStore((s) => s.activeFileIndex);
-  const activeSheetIndex = useAppStore((s) => s.activeSheetIndex);
-  const sheet = activeFileIndex !== null && activeSheetIndex !== null ? files[activeFileIndex]?.sheets[activeSheetIndex] : null;
-
-  const [selectedCols, setSelectedCols] = useState<string[]>([]);
+  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const mapping = useAppStore((s) => s.mapping);
+  const specs = useAppStore((s) => s.specs);
 
   const subgroups: number[][] = useMemo(() => {
-    if (sheet && selectedCols.length > 0) {
-      return sheet.rows
-        .map((r) => selectedCols.map((c) => Number(r[c])))
-        .filter((row) => row.every((v) => !isNaN(v)));
+    if (sheet && mapping.measureCols.length > 0) {
+      if (mapping.measureCols.length >= 2) {
+        return sheet.rows
+          .map((r) => mapping.measureCols.map((c) => Number(r[c])))
+          .filter((row) => row.every((v) => !isNaN(v)));
+      }
+      const flat = sheet.rows.map((r) => Number(r[mapping.measureCols[0]])).filter((v) => !isNaN(v));
+      const n = Math.max(2, Math.min(10, specs.subgroupSize));
+      const groups: number[][] = [];
+      for (let i = 0; i + n <= flat.length; i += n) groups.push(flat.slice(i, i + n));
+      return groups.length > 0 ? groups : DEMO_SUBGROUPS;
     }
     return DEMO_SUBGROUPS;
-  }, [sheet, selectedCols]);
+  }, [sheet, mapping.measureCols, specs.subgroupSize]);
 
   const xbarR = useMemo(() => computeXbarR(subgroups), [subgroups]);
   const xbarS = useMemo(() => computeXbarS(subgroups), [subgroups]);
   const imr = useMemo(() => computeIMR(subgroups.flat()), [subgroups]);
 
-  const usingDemo = !sheet || selectedCols.length === 0;
+  const usingDemo = !sheet || mapping.measureCols.length === 0;
 
   return (
-    <AppLayout title="Cartes SPC" subtitle="Contrôle statistique du procédé">
-      {sheet && (
-        <SectionCard title="Configuration de l'analyse" className="mb-5">
-          <div className="text-sm text-muted-foreground mb-2">Sélectionnez les colonnes de mesures (Mesure1, Mesure2…) :</div>
-          <div className="flex flex-wrap gap-2">
-            {sheet.headers.map((h) => (
-              <button
-                key={h}
-                onClick={() =>
-                  setSelectedCols((prev) => (prev.includes(h) ? prev.filter((c) => c !== h) : [...prev, h]))
-                }
-                className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
-                  selectedCols.includes(h)
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "bg-card text-foreground border-border hover:bg-accent"
-                }`}
-              >
-                {h}
-              </button>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-
+    <AppLayout title="Cartes SPC" subtitle={`${specs.projectName} · Contrôle statistique du procédé`}>
       {usingDemo && (
-        <div className="mb-5 px-4 py-2 rounded-md bg-info/10 border border-info/30 text-info text-sm">
-          📊 Démonstration avec données d'exemple. Importez un fichier Excel via la page <strong>Données</strong> pour analyser vos mesures.
+        <div className="mb-5 px-4 py-3 rounded-md bg-info/10 border border-info/30 flex items-center justify-between gap-3">
+          <div className="text-sm text-info">
+            📊 Démonstration. Importez un fichier et configurez le mappage des colonnes pour analyser vos mesures.
+          </div>
+          <Link to="/data">
+            <Button size="sm" className="gap-1.5"><Wand2 className="w-3.5 h-3.5" />Assistant</Button>
+          </Link>
         </div>
       )}
 
