@@ -1,31 +1,32 @@
 import { useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
-import { useAppStore } from "@/store/app-store";
+import { useAppStore, appActions } from "@/store/app-store";
 import { computeMSA, MSAEntry } from "@/lib/spc-engine";
 import { DEMO_MSA } from "@/lib/demo-data";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
-import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, Wand2 } from "lucide-react";
 
 const MSAPage = () => {
-  const files = useAppStore((s) => s.files);
-  const activeFileIndex = useAppStore((s) => s.activeFileIndex);
-  const activeSheetIndex = useAppStore((s) => s.activeSheetIndex);
-  const sheet = activeFileIndex !== null && activeSheetIndex !== null ? files[activeFileIndex]?.sheets[activeSheetIndex] : null;
+  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const mapping = useAppStore((s) => s.mapping);
 
-  const [colPart, setColPart] = useState<string>("");
-  const [colOp, setColOp] = useState<string>("");
-  const [colTrial, setColTrial] = useState<string>("");
-  const [colVal, setColVal] = useState<string>("");
+  // Local overrides (default to global mapping)
+  const [colPart, setColPart] = useState<string>(mapping.partCol ?? "");
+  const [colOp, setColOp] = useState<string>(mapping.operatorCol ?? "");
+  const [colTrial, setColTrial] = useState<string>(mapping.trialCol ?? "");
+  const [colVal, setColVal] = useState<string>(mapping.valueCol ?? "");
 
   const entries: MSAEntry[] = useMemo(() => {
-    if (sheet && colPart && colOp && colTrial && colVal) {
+    if (sheet && colPart && colOp && colVal) {
       return sheet.rows
-        .map((r) => ({
+        .map((r, i) => ({
           part: r[colPart],
           operator: r[colOp],
-          trial: Number(r[colTrial]),
+          trial: colTrial ? Number(r[colTrial]) : i,
           value: Number(r[colVal]),
         }))
         .filter((e) => e.part != null && e.operator != null && !isNaN(e.value));
@@ -33,8 +34,8 @@ const MSAPage = () => {
     return DEMO_MSA;
   }, [sheet, colPart, colOp, colTrial, colVal]);
 
-  const msa = useMemo(() => computeMSA(entries), [entries]);
-  const usingDemo = entries === DEMO_MSA;
+  const msa = useMemo(() => computeMSA(entries.length > 0 ? entries : DEMO_MSA), [entries]);
+  const usingDemo = entries === DEMO_MSA || entries.length === 0;
 
   const pieData = [
     { name: `EV ${msa.evPct.toFixed(1)}%`, value: msa.evPct, color: "hsl(var(--primary))" },
@@ -54,7 +55,13 @@ const MSAPage = () => {
   return (
     <AppLayout title="MSA — Gage R&R" subtitle="Répétabilité & Reproductibilité (méthode moyenne & étendue)">
       {sheet && (
-        <SectionCard title="Mappage des colonnes" className="mb-5">
+        <SectionCard title="Mappage des colonnes (surcharge locale)" className="mb-5"
+          actions={
+            <Link to="/data">
+              <Button variant="outline" size="sm" className="gap-1.5"><Wand2 className="w-3.5 h-3.5" />Assistant</Button>
+            </Link>
+          }
+        >
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
               { label: "Pièce", state: colPart, setter: setColPart },
@@ -79,6 +86,7 @@ const MSAPage = () => {
           📊 Démonstration : 10 pièces × 3 opérateurs × 3 essais.
         </div>
       )}
+
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <SectionCard title="Configuration">
