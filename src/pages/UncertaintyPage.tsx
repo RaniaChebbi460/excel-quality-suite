@@ -10,16 +10,15 @@ import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 
 const UncertaintyPage = () => {
-  const files = useAppStore((s) => s.files);
-  const activeFileIndex = useAppStore((s) => s.activeFileIndex);
-  const activeSheetIndex = useAppStore((s) => s.activeSheetIndex);
-  const sheet = activeFileIndex !== null && activeSheetIndex !== null ? files[activeFileIndex]?.sheets[activeSheetIndex] : null;
-  const [selectedCol, setSelectedCol] = useState<string | null>(null);
+  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const mapping = useAppStore((s) => s.mapping);
+  const [overrideCol, setOverrideCol] = useState<string | null>(null);
 
   const values = useMemo(() => {
-    if (sheet && selectedCol) return sheet.rows.map((r) => Number(r[selectedCol])).filter((v) => !isNaN(v));
+    const col = overrideCol ?? mapping.measureCols[0];
+    if (sheet && col) return sheet.rows.map((r) => Number(r[col])).filter((v) => !isNaN(v));
     return DEMO_SUBGROUPS.flat();
-  }, [sheet, selectedCol]);
+  }, [sheet, overrideCol, mapping.measureCols]);
 
   const [k, setK] = useState(2);
   const [components, setComponents] = useState<UncertaintyComponent[]>([
