@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
-import { useAppStore } from "@/store/app-store";
+import { useAppStore, appActions } from "@/store/app-store";
 import { computeUncertaintyTypeA, combineUncertainties, UncertaintyComponent } from "@/lib/spc-engine";
 import { DEMO_SUBGROUPS } from "@/lib/demo-data";
 import { Input } from "@/components/ui/input";
@@ -42,7 +42,7 @@ const UncertaintyPage = () => {
           {sheet && (
             <div className="mb-3">
               <Label className="text-xs">Colonne</Label>
-              <select value={selectedCol ?? ""} onChange={(e) => setSelectedCol(e.target.value || null)} className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm">
+              <select value={overrideCol ?? ""} onChange={(e) => setOverrideCol(e.target.value || null)} className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm">
                 <option value="">— Démo —</option>
                 {sheet.headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
