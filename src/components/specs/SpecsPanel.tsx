@@ -13,7 +13,7 @@ export const SpecsPanel = ({ compact = false }: { compact?: boolean }) => {
         <span className="flex items-center gap-2">
           <Target className="w-4 h-4 text-primary" />
           Spécifications du projet
-        </span> as any
+        </span>
       }
     >
       <div className={`grid ${compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-3"} gap-3`}>
