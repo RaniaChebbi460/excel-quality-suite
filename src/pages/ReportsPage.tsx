@@ -40,6 +40,7 @@ type ReportSection = "spc" | "capability" | "msa" | "uncertainty";
 const ReportsPage = () => {
   const specs = useAppStore((s) => s.specs);
   const mapping = useAppStore((s) => s.mapping);
+  const perColumnSpecs = useAppStore((s) => s.perColumnSpecs);
   const sheet = useAppStore(() => appActions.getAnalysisSheet());
   const filesCount = useAppStore((s) => s.files.length);
 
@@ -145,7 +146,7 @@ const ReportsPage = () => {
     }
   };
 
-  // ===== PDF Export =====
+  // ===== PDF Export — hierarchical structure with clickable TOC =====
   const exportPdf = async () => {
     setBusy("pdf");
     try {
@@ -153,57 +154,89 @@ const ReportsPage = () => {
       const autoTable = (await import("jspdf-autotable")).default;
       const doc = new jsPDF({ unit: "mm", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
 
-      // Cover
-      doc.setFontSize(20);
-      doc.setTextColor(37, 99, 235);
-      doc.text("Rapport SPC / MSA / Capabilité", 14, 22);
+      // Per-column capability table (annex)
+      const perColumnCap = (sheet && mapping.measureCols.length > 0)
+        ? mapping.measureCols.map((c) => {
+            const vals = sheet.rows.map((r) => Number(r[c])).filter((v) => !isNaN(v));
+            const eff = perColumnSpecs[c] ?? { lsl: specs.lsl, usl: specs.usl, target: specs.target };
+            const ccap = vals.length > 1
+              ? computeCapability(vals, eff.lsl, eff.usl, eff.target, specs.subgroupSize)
+              : null;
+            return { col: c, eff, cap: ccap, n: vals.length };
+          })
+        : [];
+
+      // Track sections for TOC: { title, page }
+      const tocEntries: { title: string; level: number; page: number }[] = [];
+
+      // ===== Cover (page 1) =====
+      doc.setFillColor(37, 99, 235);
+      doc.rect(0, 0, pageW, 50, "F");
+      doc.setTextColor(255);
+      doc.setFontSize(22);
+      doc.text("Rapport d'analyse statistique", 14, 22);
+      doc.setFontSize(13);
+      doc.text("SPC · MSA · Capabilité · Incertitude", 14, 32);
+      doc.setFontSize(10);
+      doc.text(new Date().toLocaleString(), 14, 42);
+
+      doc.setTextColor(0);
+      doc.setFontSize(28);
+      doc.text(specs.projectName, 14, 80);
       doc.setFontSize(11);
       doc.setTextColor(80);
-      doc.text(`Projet : ${specs.projectName}`, 14, 32);
-      doc.text(`Généré le ${new Date().toLocaleString()}`, 14, 38);
-      doc.text(`Spécifications : LSL=${specs.lsl} · Target=${specs.target} · USL=${specs.usl} · Unité ${specs.unit}`, 14, 44);
+      doc.text(`Spécifications globales : LSL = ${specs.lsl} · Cible = ${specs.target} · USL = ${specs.usl} (${specs.unit})`, 14, 92);
+      doc.text(`Taille sous-groupe : n = ${specs.subgroupSize}`, 14, 100);
+      doc.text(`Source : ${filesCount > 0 ? `${filesCount} fichier(s) Excel importé(s)` : "Données de démonstration"}`, 14, 108);
+
       doc.setTextColor(0);
+      doc.setFontSize(11);
+      doc.text("Sections incluses :", 14, 130);
+      const sections = [
+        selected.spc && "1. Contrôle statistique du procédé (SPC)",
+        selected.capability && "2. Capabilité du processus",
+        selected.msa && "3. Analyse du système de mesure (MSA)",
+        selected.uncertainty && "4. Incertitude de mesure",
+      ].filter(Boolean) as string[];
+      sections.forEach((s, i) => doc.text(`• ${s}`, 18, 140 + i * 7));
+      doc.text("Annexes : tableaux complets, données brutes, paramètres", 14, 140 + sections.length * 7 + 10);
 
-      let y = 54;
-      const sectionsList = [
-        selected.spc && "SPC (X̄-R)",
-        selected.capability && "Capabilité (Cp/Cpk/Pp/Ppk)",
-        selected.msa && "MSA (Gage R&R)",
-        selected.uncertainty && "Incertitude de mesure",
-      ].filter(Boolean);
+      // ===== TOC placeholder (page 2) — we'll re-render after collecting entries =====
+      doc.addPage();
+      const tocPageNumber = doc.internal.pages.length - 1;
 
-      autoTable(doc, {
-        startY: y,
-        head: [["Sections incluses dans le rapport"]],
-        body: sectionsList.map((s) => [s as string]),
-        theme: "striped",
-        headStyles: { fillColor: [37, 99, 235] },
-      });
-      y = (doc as any).lastAutoTable.finalY + 8;
-
-      // ===== SPC =====
-      if (selected.spc) {
+      // Helper to register section page
+      const startSection = (title: string, level = 1) => {
         doc.addPage();
-        doc.setFontSize(16);
+        const pageNum = doc.internal.pages.length - 1;
+        tocEntries.push({ title, level, page: pageNum });
+        doc.setFontSize(level === 1 ? 16 : 13);
         doc.setTextColor(37, 99, 235);
-        doc.text("1. Contrôle statistique du procédé (SPC)", 14, 18);
+        doc.text(title, 14, 18);
         doc.setTextColor(0);
+        doc.setFontSize(11);
+        return pageNum;
+      };
+
+      // ===== 1. SPC =====
+      if (selected.spc) {
+        startSection("1. Contrôle statistique du procédé (SPC)", 1);
         autoTable(doc, {
           startY: 24,
           head: [["Paramètre", "Valeur"]],
           body: [
-            ["Nombre de sous-groupes", String(subgroups.length)],
-            ["Taille de sous-groupe (n)", String(spc.n)],
-            ["Moyenne X̄", spc.xbar.toFixed(4)],
+            ["Sous-groupes", String(subgroups.length)],
+            ["Taille (n)", String(spc.n)],
+            ["X̄ (moyenne)", spc.xbar.toFixed(4)],
             ["R̄", spc.rbar.toFixed(4)],
             ["UCL X̄", spc.uclX.toFixed(4)],
             ["LCL X̄", spc.lclX.toFixed(4)],
             ["UCL R", spc.uclR.toFixed(4)],
-            ["LCL R", spc.lclR.toFixed(4)],
             ["σ̂ (court terme)", spc.sigmaHat.toFixed(4)],
             ["Points hors contrôle", String(spc.outOfControl.length)],
-            ["Règles Western Electric déclenchées", String(spc.westernElectric.length)],
+            ["Règles WE déclenchées", String(spc.westernElectric.length)],
           ],
           theme: "grid",
           headStyles: { fillColor: [37, 99, 235] },
@@ -215,18 +248,27 @@ const ReportsPage = () => {
           cy += 74;
         }
         const rImg = await captureNode(rChartRef.current);
-        if (rImg) {
-          doc.addImage(rImg, "PNG", 14, cy, pageW - 28, 60);
+        if (rImg) doc.addImage(rImg, "PNG", 14, cy, pageW - 28, 60);
+
+        // Subsection: anomalies
+        if (spc.westernElectric.length > 0 || spc.outOfControl.length > 0) {
+          startSection("1.1 Anomalies détectées", 2);
+          autoTable(doc, {
+            startY: 24,
+            head: [["Type", "Règle", "Sous-groupe", "Description"]],
+            body: [
+              ...spc.outOfControl.map((i) => ["Hors limites", "—", `#${i + 1}`, "Point au-delà des limites de contrôle"]),
+              ...spc.westernElectric.map((r) => [`Règle WE ${r.rule}`, String(r.rule), `#${r.index + 1}`, r.description]),
+            ],
+            theme: "striped",
+            headStyles: { fillColor: [220, 38, 38] },
+          });
         }
       }
 
-      // ===== Capability =====
+      // ===== 2. Capability =====
       if (selected.capability) {
-        doc.addPage();
-        doc.setFontSize(16);
-        doc.setTextColor(37, 99, 235);
-        doc.text("2. Capabilité du processus", 14, 18);
-        doc.setTextColor(0);
+        startSection("2. Capabilité du processus", 1);
         autoTable(doc, {
           startY: 24,
           head: [["Indice", "Valeur", "Statut"]],
@@ -250,17 +292,39 @@ const ReportsPage = () => {
         }
         doc.setFontSize(10);
         doc.setTextColor(60);
-        doc.text(`Interprétation : ${cap.interpretation}`, 14, 270);
+        doc.text(`Interprétation : ${cap.interpretation}`, 14, pageH - 20);
         doc.setTextColor(0);
+
+        // Per-column capability subsection
+        if (perColumnCap.length > 1) {
+          startSection("2.1 Capabilité par colonne de mesure", 2);
+          autoTable(doc, {
+            startY: 24,
+            head: [["Colonne", "LSL", "Cible", "USL", "Moyenne", "σ", "Cp", "Cpk", "Ppk", "Statut"]],
+            body: perColumnCap
+              .filter((p) => p.cap)
+              .map((p) => [
+                p.col,
+                String(p.eff.lsl),
+                String(p.eff.target),
+                String(p.eff.usl),
+                p.cap!.mean.toFixed(3),
+                p.cap!.stdLongTerm.toFixed(3),
+                p.cap!.cp.toFixed(2),
+                p.cap!.cpk.toFixed(2),
+                p.cap!.ppk.toFixed(2),
+                p.cap!.status,
+              ]),
+            theme: "grid",
+            headStyles: { fillColor: [37, 99, 235] },
+            styles: { fontSize: 8 },
+          });
+        }
       }
 
-      // ===== MSA =====
+      // ===== 3. MSA =====
       if (selected.msa) {
-        doc.addPage();
-        doc.setFontSize(16);
-        doc.setTextColor(37, 99, 235);
-        doc.text("3. MSA — Gage R&R", 14, 18);
-        doc.setTextColor(0);
+        startSection("3. Analyse du système de mesure (MSA)", 1);
         autoTable(doc, {
           startY: 24,
           head: [["Source", "Écart-type", "% Contribution", "% Study Var"]],
@@ -280,7 +344,7 @@ const ReportsPage = () => {
             ["Pièces", String(msa.parts)],
             ["Opérateurs", String(msa.operators)],
             ["Essais", String(msa.trials)],
-            ["ndc (catégories distinctes)", String(msa.ndc)],
+            ["ndc", String(msa.ndc)],
             ["%GRR", msa.grrPct.toFixed(2) + "%"],
             ["Statut", msa.interpretation],
           ],
@@ -294,25 +358,21 @@ const ReportsPage = () => {
         }
       }
 
-      // ===== Uncertainty =====
+      // ===== 4. Uncertainty =====
       if (selected.uncertainty) {
-        doc.addPage();
-        doc.setFontSize(16);
-        doc.setTextColor(37, 99, 235);
-        doc.text("4. Incertitude de mesure", 14, 18);
-        doc.setTextColor(0);
+        startSection("4. Incertitude de mesure", 1);
         autoTable(doc, {
           startY: 24,
           head: [["Composante", "Valeur"]],
           body: [
-            ["N (mesures)", String(typeA.n)],
+            ["N", String(typeA.n)],
             ["Moyenne", typeA.mean.toFixed(4)],
-            ["Écart-type s", typeA.s.toFixed(5)],
-            ["uA (Type A)", uncertainty.uA.toFixed(5)],
-            ["uB (Type B)", uncertainty.uB.toFixed(5)],
-            ["uC (combinée)", uncertainty.uC.toFixed(5)],
-            ["Facteur k", String(uncertainty.k)],
-            ["U (élargie)", uncertainty.U.toFixed(5)],
+            ["s", typeA.s.toFixed(5)],
+            ["uA", uncertainty.uA.toFixed(5)],
+            ["uB", uncertainty.uB.toFixed(5)],
+            ["uC", uncertainty.uC.toFixed(5)],
+            ["k", String(uncertainty.k)],
+            ["U", uncertainty.U.toFixed(5)],
             ["Résultat", `${typeA.mean.toFixed(4)} ± ${uncertainty.U.toFixed(5)} ${specs.unit}`],
           ],
           theme: "grid",
@@ -320,8 +380,119 @@ const ReportsPage = () => {
         });
       }
 
+      // ===== Annexes =====
+      startSection("A. Annexes — Paramètres du projet", 1);
+      autoTable(doc, {
+        startY: 24,
+        head: [["Paramètre", "Valeur"]],
+        body: [
+          ["Projet", specs.projectName],
+          ["Unité", specs.unit],
+          ["LSL globale", String(specs.lsl)],
+          ["Cible globale", String(specs.target)],
+          ["USL globale", String(specs.usl)],
+          ["n (sous-groupe)", String(specs.subgroupSize)],
+          ["Mappage mesures", mapping.measureCols.join(", ") || "—"],
+          ["Mappage MSA — Pièce", mapping.partCol ?? "—"],
+          ["Mappage MSA — Opérateur", mapping.operatorCol ?? "—"],
+          ["Mappage MSA — Valeur", mapping.valueCol ?? "—"],
+        ],
+        theme: "grid",
+        headStyles: { fillColor: [100, 100, 100] },
+      });
+
+      if (Object.keys(perColumnSpecs).length > 0) {
+        startSection("B. Annexes — Spécifications par colonne", 1);
+        autoTable(doc, {
+          startY: 24,
+          head: [["Colonne", "LSL", "Cible", "USL"]],
+          body: Object.entries(perColumnSpecs).map(([c, v]) => [c, String(v.lsl), String(v.target), String(v.usl)]),
+          theme: "striped",
+          headStyles: { fillColor: [100, 100, 100] },
+        });
+      }
+
+      startSection("C. Annexes — Données sources (extrait)", 1);
+      autoTable(doc, {
+        startY: 24,
+        head: [["#", ...Array.from({ length: spc.n }, (_, i) => `M${i + 1}`), "X̄", "R"]],
+        body: subgroups.slice(0, 25).map((g, i) => [
+          String(i + 1),
+          ...g.map((v) => v.toFixed(3)),
+          spc.subgroupMeans[i].toFixed(3),
+          spc.subgroupRanges[i].toFixed(3),
+        ]),
+        theme: "striped",
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [100, 100, 100] },
+      });
+      if (subgroups.length > 25) {
+        doc.setFontSize(9);
+        doc.setTextColor(120);
+        doc.text(`... ${subgroups.length - 25} sous-groupes supplémentaires non affichés`, 14, (doc as any).lastAutoTable.finalY + 6);
+        doc.setTextColor(0);
+      }
+
+      // ===== Re-render TOC on page 2 =====
+      doc.setPage(tocPageNumber);
+      doc.setFontSize(20);
+      doc.setTextColor(37, 99, 235);
+      doc.text("Table des matières", 14, 22);
+      doc.setTextColor(0);
+      doc.setFontSize(11);
+      let ty = 36;
+      tocEntries.forEach((entry) => {
+        const indent = entry.level === 1 ? 14 : 22;
+        const fontSize = entry.level === 1 ? 11 : 10;
+        doc.setFontSize(fontSize);
+        if (entry.level === 1) doc.setFont("helvetica", "bold");
+        else doc.setFont("helvetica", "normal");
+
+        const titleX = indent;
+        const pageX = pageW - 20;
+        const text = entry.title;
+        doc.text(text, titleX, ty);
+        // dotted leaders
+        const dotsStart = titleX + doc.getTextWidth(text) + 2;
+        const dotsEnd = pageX - 6;
+        if (dotsEnd > dotsStart) {
+          doc.setTextColor(180);
+          let dx = dotsStart;
+          while (dx < dotsEnd) {
+            doc.text(".", dx, ty);
+            dx += 2;
+          }
+          doc.setTextColor(0);
+        }
+        doc.text(String(entry.page), pageX, ty);
+
+        // Clickable link to the page
+        const linkY = ty - 4;
+        const linkH = 6;
+        const linkW = pageW - titleX - 10;
+        (doc as any).link(titleX, linkY, linkW, linkH, { pageNumber: entry.page });
+
+        ty += entry.level === 1 ? 8 : 6.5;
+        if (ty > pageH - 20) {
+          doc.addPage();
+          doc.setPage(doc.internal.pages.length - 1);
+          ty = 22;
+        }
+      });
+      doc.setFont("helvetica", "normal");
+
+      // Page numbers footer on all pages
+      const total = doc.internal.pages.length - 1;
+      for (let p = 1; p <= total; p++) {
+        doc.setPage(p);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(`${specs.projectName} · Page ${p} / ${total}`, pageW / 2, pageH - 6, { align: "center" });
+        doc.setTextColor(0);
+      }
+
       doc.save(`rapport_${specs.projectName.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.pdf`);
-      toast.success("Rapport PDF généré");
+      toast.success("Rapport PDF généré avec table des matières cliquable");
     } catch (err: any) {
       toast.error("Erreur PDF", { description: err.message });
     } finally {
