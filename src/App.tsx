@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Dashboard from "./pages/Dashboard";
 import DataPage from "./pages/DataPage";
+import ImportPlanPage from "./pages/ImportPlanPage";
 import SPCPage from "./pages/SPCPage";
 import CapabilityPage from "./pages/CapabilityPage";
 import MSAPage from "./pages/MSAPage";
@@ -24,6 +25,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/data" element={<DataPage />} />
+          <Route path="/import-plan" element={<ImportPlanPage />} />
           <Route path="/spc" element={<SPCPage />} />
           <Route path="/capability" element={<CapabilityPage />} />
           <Route path="/msa" element={<MSAPage />} />
