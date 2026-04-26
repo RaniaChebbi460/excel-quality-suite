@@ -162,7 +162,7 @@ const ReportsPage = () => {
             const vals = sheet.rows.map((r) => Number(r[c])).filter((v) => !isNaN(v));
             const eff = perColumnSpecs[c] ?? { lsl: specs.lsl, usl: specs.usl, target: specs.target };
             const ccap = vals.length > 1
-              ? (require("@/lib/spc-engine") as any).computeCapability(vals, eff.lsl, eff.usl, eff.target, specs.subgroupSize)
+              ? computeCapability(vals, eff.lsl, eff.usl, eff.target, specs.subgroupSize)
               : null;
             return { col: c, eff, cap: ccap, n: vals.length };
           })
