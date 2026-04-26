@@ -31,19 +31,34 @@ export interface ProjectSpecs {
   projectName: string;
 }
 
+// ===== Per-column specs (override global) =====
+export interface ColumnSpec {
+  lsl: number;
+  usl: number;
+  target: number;
+}
+export type PerColumnSpecs = Record<string, ColumnSpec>;
+
 // ===== Column mapping (validated by wizard) =====
 export interface ColumnMapping {
-  // SPC / Capability
-  measureCols: string[];        // one or more numeric cols (subgroup measures or single value column)
-  // MSA
+  measureCols: string[];
   partCol: string | null;
   operatorCol: string | null;
   trialCol: string | null;
   valueCol: string | null;
-  // Optional override of LSL/USL coming from the sheet itself
   lslCol: string | null;
   uslCol: string | null;
   validated: boolean;
+}
+
+// ===== Import plan (which sheets/fields are merged) =====
+export interface ImportPlan {
+  // sheetKey = `${fileIndex}::${sheetIndex}` → enabled
+  enabledSheets: Record<string, boolean>;
+  // column rename map: original header → canonical name (after compatibility check)
+  columnAliases: Record<string, string>;
+  // explicitly excluded canonical column names
+  excludedColumns: string[];
 }
 
 export interface AppState {
@@ -51,8 +66,10 @@ export interface AppState {
   activeFileIndex: number | null;
   activeSheetIndex: number | null;
   specs: ProjectSpecs;
+  perColumnSpecs: PerColumnSpecs;
   mapping: ColumnMapping;
-  mergedSheet: ParsedSheet | null; // result of multi-file merge
+  mergedSheet: ParsedSheet | null;
+  importPlan: ImportPlan;
 }
 
 const DEFAULT_SPECS: ProjectSpecs = {
@@ -75,7 +92,13 @@ const DEFAULT_MAPPING: ColumnMapping = {
   validated: false,
 };
 
-const STORAGE_KEY = "spc-app-state-v2";
+const DEFAULT_PLAN: ImportPlan = {
+  enabledSheets: {},
+  columnAliases: {},
+  excludedColumns: [],
+};
+
+const STORAGE_KEY = "spc-app-state-v3";
 
 function loadPersisted(): Partial<AppState> {
   try {
@@ -85,6 +108,8 @@ function loadPersisted(): Partial<AppState> {
     return {
       specs: parsed.specs ?? DEFAULT_SPECS,
       mapping: parsed.mapping ?? DEFAULT_MAPPING,
+      perColumnSpecs: parsed.perColumnSpecs ?? {},
+      importPlan: parsed.importPlan ?? DEFAULT_PLAN,
     };
   } catch {
     return {};
@@ -98,14 +123,24 @@ const store = new SimpleStore<AppState>({
   activeFileIndex: null,
   activeSheetIndex: null,
   specs: { ...DEFAULT_SPECS, ...(persisted.specs || {}) },
+  perColumnSpecs: persisted.perColumnSpecs || {},
   mapping: { ...DEFAULT_MAPPING, ...(persisted.mapping || {}) },
   mergedSheet: null,
+  importPlan: { ...DEFAULT_PLAN, ...(persisted.importPlan || {}) },
 });
 
 function persist() {
   const s = store.get();
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ specs: s.specs, mapping: s.mapping }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        specs: s.specs,
+        mapping: s.mapping,
+        perColumnSpecs: s.perColumnSpecs,
+        importPlan: s.importPlan,
+      })
+    );
   } catch {}
 }
 
@@ -113,42 +148,121 @@ export function useAppStore<S>(selector: (s: AppState) => S): S {
   return useSyncExternalStore(store.subscribe, () => selector(store.get()), () => selector(store.get()));
 }
 
-// ===== Merge utility: union compatible columns across all sheets =====
-export function mergeFiles(files: ParsedFile[]): ParsedSheet | null {
-  if (files.length === 0) return null;
-  // Take all sheets from all files
-  const allSheets: ParsedSheet[] = files.flatMap((f) => f.sheets);
-  if (allSheets.length === 0) return null;
-  if (allSheets.length === 1) return allSheets[0];
+// ===== Compatibility analysis between sheets =====
+export interface CompatibilityReport {
+  unionHeaders: string[];
+  commonHeaders: string[];
+  perSheetUnique: { sheetLabel: string; unique: string[] }[];
+  ignored: string[]; // headers excluded
+  renamed: { from: string; to: string }[];
+}
 
-  // Build union of headers
+function sheetLabel(fileIdx: number, sheetIdx: number, files: ParsedFile[]) {
+  const f = files[fileIdx];
+  return `${f?.name ?? "?"} / ${f?.sheets[sheetIdx]?.name ?? "?"}`;
+}
+
+export function analyzeCompatibility(files: ParsedFile[], plan: ImportPlan): CompatibilityReport {
+  const selected: { sheet: ParsedSheet; label: string }[] = [];
+  files.forEach((f, fi) =>
+    f.sheets.forEach((s, si) => {
+      const key = `${fi}::${si}`;
+      if (plan.enabledSheets[key] !== false) {
+        selected.push({ sheet: s, label: sheetLabel(fi, si, files) });
+      }
+    })
+  );
+  const allHeaders = new Set<string>();
+  const headerCount = new Map<string, number>();
+  selected.forEach(({ sheet }) => {
+    sheet.headers.forEach((h) => {
+      const canonical = plan.columnAliases[h] ?? h;
+      allHeaders.add(canonical);
+      headerCount.set(canonical, (headerCount.get(canonical) ?? 0) + 1);
+    });
+  });
+  const unionHeaders = Array.from(allHeaders).filter((h) => !plan.excludedColumns.includes(h));
+  const commonHeaders = unionHeaders.filter((h) => (headerCount.get(h) ?? 0) === selected.length);
+  const perSheetUnique = selected.map(({ sheet, label }) => {
+    const cols = sheet.headers.map((h) => plan.columnAliases[h] ?? h);
+    const unique = cols.filter((c) => (headerCount.get(c) ?? 0) === 1);
+    return { sheetLabel: label, unique };
+  });
+  const ignored = plan.excludedColumns.slice();
+  const renamed = Object.entries(plan.columnAliases).map(([from, to]) => ({ from, to }));
+  return { unionHeaders, commonHeaders, perSheetUnique, ignored, renamed };
+}
+
+// ===== Merge utility (respecting import plan) =====
+export function mergeFiles(files: ParsedFile[], plan?: ImportPlan): ParsedSheet | null {
+  if (files.length === 0) return null;
+  const aliases = plan?.columnAliases ?? {};
+  const excluded = new Set(plan?.excludedColumns ?? []);
+
+  const allSheets: { sheet: ParsedSheet; label: string }[] = [];
+  files.forEach((f, fi) =>
+    f.sheets.forEach((s, si) => {
+      const key = `${fi}::${si}`;
+      if (!plan || plan.enabledSheets[key] !== false) {
+        allSheets.push({ sheet: s, label: sheetLabel(fi, si, files) });
+      }
+    })
+  );
+  if (allSheets.length === 0) return null;
+  if (allSheets.length === 1 && Object.keys(aliases).length === 0 && excluded.size === 0) {
+    return allSheets[0].sheet;
+  }
+
   const headerSet = new Set<string>();
-  allSheets.forEach((s) => s.headers.forEach((h) => headerSet.add(h)));
+  allSheets.forEach(({ sheet }) =>
+    sheet.headers.forEach((h) => {
+      const canonical = aliases[h] ?? h;
+      if (!excluded.has(canonical)) headerSet.add(canonical);
+    })
+  );
   const headers = Array.from(headerSet);
 
-  // Concatenate rows
   const rows: Record<string, any>[] = [];
-  allSheets.forEach((s) => {
-    s.rows.forEach((r) => {
-      const row: Record<string, any> = {};
-      headers.forEach((h) => (row[h] = r[h] ?? null));
+  allSheets.forEach(({ sheet, label }) => {
+    sheet.rows.forEach((r) => {
+      const row: Record<string, any> = { __source: label };
+      headers.forEach((h) => (row[h] = null));
+      sheet.headers.forEach((h) => {
+        const canonical = aliases[h] ?? h;
+        if (!excluded.has(canonical)) row[canonical] = r[h];
+      });
       rows.push(row);
     });
   });
 
-  const matrix: any[][] = [headers, ...rows.map((r) => headers.map((h) => r[h]))];
-  return { name: "Fusion globale", headers, rows, matrix };
+  const finalHeaders = ["__source", ...headers];
+  const matrix: any[][] = [finalHeaders, ...rows.map((r) => finalHeaders.map((h) => r[h]))];
+  return { name: "Fusion globale", headers: finalHeaders, rows, matrix };
 }
 
 export const appActions = {
   addFile: (f: ParsedFile) => {
     const files = [...store.get().files, f];
-    const merged = mergeFiles(files);
-    store.set({ files, activeFileIndex: files.length - 1, activeSheetIndex: 0, mergedSheet: merged });
+    // Auto-enable all sheets of new file in plan
+    const plan = { ...store.get().importPlan };
+    f.sheets.forEach((_, si) => {
+      const key = `${files.length - 1}::${si}`;
+      if (plan.enabledSheets[key] === undefined) plan.enabledSheets[key] = true;
+    });
+    const merged = mergeFiles(files, plan);
+    store.set({
+      files,
+      activeFileIndex: files.length - 1,
+      activeSheetIndex: 0,
+      mergedSheet: merged,
+      importPlan: plan,
+    });
+    persist();
   },
   removeFile: (idx: number) => {
     const files = store.get().files.filter((_, i) => i !== idx);
-    const merged = mergeFiles(files);
+    const plan = store.get().importPlan;
+    const merged = mergeFiles(files, plan);
     store.set({
       files,
       activeFileIndex: files.length ? 0 : null,
@@ -163,7 +277,6 @@ export const appActions = {
     if (s.activeFileIndex === null || s.activeSheetIndex === null) return null;
     return s.files[s.activeFileIndex]?.sheets[s.activeSheetIndex] ?? null;
   },
-  // Returns the data sheet to use for analysis: merged if multiple files, else active sheet
   getAnalysisSheet: (): ParsedSheet | null => {
     const s = store.get();
     if (s.files.length > 1 && s.mergedSheet) return s.mergedSheet;
@@ -173,6 +286,24 @@ export const appActions = {
     store.set({ specs: { ...store.get().specs, ...patch } });
     persist();
   },
+  setColumnSpec: (col: string, patch: Partial<ColumnSpec>) => {
+    const s = store.get();
+    const current = s.perColumnSpecs[col] ?? { lsl: s.specs.lsl, usl: s.specs.usl, target: s.specs.target };
+    store.set({ perColumnSpecs: { ...s.perColumnSpecs, [col]: { ...current, ...patch } } });
+    persist();
+  },
+  removeColumnSpec: (col: string) => {
+    const s = store.get();
+    const next = { ...s.perColumnSpecs };
+    delete next[col];
+    store.set({ perColumnSpecs: next });
+    persist();
+  },
+  getEffectiveSpec: (col: string | null | undefined): ColumnSpec => {
+    const s = store.get();
+    if (col && s.perColumnSpecs[col]) return s.perColumnSpecs[col];
+    return { lsl: s.specs.lsl, usl: s.specs.usl, target: s.specs.target };
+  },
   setMapping: (patch: Partial<ColumnMapping>) => {
     store.set({ mapping: { ...store.get().mapping, ...patch } });
     persist();
@@ -180,5 +311,39 @@ export const appActions = {
   resetMapping: () => {
     store.set({ mapping: { ...DEFAULT_MAPPING } });
     persist();
+  },
+  // ===== Import plan =====
+  setSheetEnabled: (fileIdx: number, sheetIdx: number, enabled: boolean) => {
+    const plan = { ...store.get().importPlan };
+    plan.enabledSheets = { ...plan.enabledSheets, [`${fileIdx}::${sheetIdx}`]: enabled };
+    const merged = mergeFiles(store.get().files, plan);
+    store.set({ importPlan: plan, mergedSheet: merged });
+    persist();
+  },
+  setColumnAlias: (from: string, to: string) => {
+    const plan = { ...store.get().importPlan };
+    if (!to || to === from) {
+      const next = { ...plan.columnAliases };
+      delete next[from];
+      plan.columnAliases = next;
+    } else {
+      plan.columnAliases = { ...plan.columnAliases, [from]: to };
+    }
+    const merged = mergeFiles(store.get().files, plan);
+    store.set({ importPlan: plan, mergedSheet: merged });
+    persist();
+  },
+  toggleExcludedColumn: (col: string) => {
+    const plan = { ...store.get().importPlan };
+    plan.excludedColumns = plan.excludedColumns.includes(col)
+      ? plan.excludedColumns.filter((c) => c !== col)
+      : [...plan.excludedColumns, col];
+    const merged = mergeFiles(store.get().files, plan);
+    store.set({ importPlan: plan, mergedSheet: merged });
+    persist();
+  },
+  rebuildMerge: () => {
+    const merged = mergeFiles(store.get().files, store.get().importPlan);
+    store.set({ mergedSheet: merged });
   },
 };
