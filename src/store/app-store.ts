@@ -1,5 +1,6 @@
 import type { ParsedFile, ParsedSheet } from "@/lib/excel";
 import { useSyncExternalStore } from "react";
+import { detectSheet, type DetectedKind } from "@/lib/auto-detect";
 
 type Listener = () => void;
 
