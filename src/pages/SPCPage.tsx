@@ -2,19 +2,18 @@ import { useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
 import { ControlChart } from "@/components/charts/ControlChart";
+import { EmptyState } from "@/components/dashboard/EmptyState";
 import { useAppStore, appActions } from "@/store/app-store";
 import { computeXbarR, computeXbarS, computeIMR } from "@/lib/spc-engine";
-import { DEMO_SUBGROUPS } from "@/lib/demo-data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, Wand2, ZoomIn } from "lucide-react";
-import { Link } from "react-router-dom";
+import { AlertTriangle, CheckCircle2, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type ChartKind = "xbar-r" | "xbar-s" | "i-mr";
 
 const SPCPage = () => {
-  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const spcSheet = useAppStore(() => appActions.getSheetForKind("spc"));
   const mapping = useAppStore((s) => s.mapping);
   const specs = useAppStore((s) => s.specs);
 
@@ -22,26 +21,24 @@ const SPCPage = () => {
   const xbarRef = useRef<HTMLDivElement>(null);
 
   const subgroups: number[][] = useMemo(() => {
-    if (sheet && mapping.measureCols.length > 0) {
-      if (mapping.measureCols.length >= 2) {
-        return sheet.rows
-          .map((r) => mapping.measureCols.map((c) => Number(r[c])))
-          .filter((row) => row.every((v) => !isNaN(v)));
-      }
-      const flat = sheet.rows.map((r) => Number(r[mapping.measureCols[0]])).filter((v) => !isNaN(v));
-      const n = Math.max(2, Math.min(10, specs.subgroupSize));
-      const groups: number[][] = [];
-      for (let i = 0; i + n <= flat.length; i += n) groups.push(flat.slice(i, i + n));
-      return groups.length > 0 ? groups : DEMO_SUBGROUPS;
+    if (!spcSheet || mapping.measureCols.length === 0) return [];
+    if (mapping.measureCols.length >= 2) {
+      return spcSheet.rows
+        .map((r) => mapping.measureCols.map((c) => Number(r[c])))
+        .filter((row) => row.every((v) => !isNaN(v)));
     }
-    return DEMO_SUBGROUPS;
-  }, [sheet, mapping.measureCols, specs.subgroupSize]);
+    const flat = spcSheet.rows.map((r) => Number(r[mapping.measureCols[0]])).filter((v) => !isNaN(v));
+    const n = Math.max(2, Math.min(10, specs.subgroupSize));
+    const groups: number[][] = [];
+    for (let i = 0; i + n <= flat.length; i += n) groups.push(flat.slice(i, i + n));
+    return groups;
+  }, [spcSheet, mapping.measureCols, specs.subgroupSize]);
 
-  const xbarR = useMemo(() => computeXbarR(subgroups), [subgroups]);
-  const xbarS = useMemo(() => computeXbarS(subgroups), [subgroups]);
-  const imr = useMemo(() => computeIMR(subgroups.flat()), [subgroups]);
+  const hasData = subgroups.length > 0;
 
-  const usingDemo = !sheet || mapping.measureCols.length === 0;
+  const xbarR = useMemo(() => (hasData ? computeXbarR(subgroups) : null), [hasData, subgroups]);
+  const xbarS = useMemo(() => (hasData ? computeXbarS(subgroups) : null), [hasData, subgroups]);
+  const imr = useMemo(() => (hasData ? computeIMR(subgroups.flat()) : null), [hasData, subgroups]);
 
   // Build anomalies table from all charts (X̄-R drives WE rules)
   const anomalies = useMemo(() => {
@@ -50,112 +47,58 @@ const SPCPage = () => {
       chartLabel: string;
       rule: string;
       ruleNumber: number | null;
-      pointIndex: number; // 0-based
+      pointIndex: number;
       value: number;
       type: "OOC" | "WE";
     }[] = [];
+    if (!xbarR || !xbarS || !imr) return list;
     xbarR.outOfControl.forEach((i) =>
-      list.push({
-        kind: "xbar-r",
-        chartLabel: "X̄ (Moyennes)",
-        rule: "Point hors limites de contrôle",
-        ruleNumber: null,
-        pointIndex: i,
-        value: xbarR.subgroupMeans[i],
-        type: "OOC",
-      })
+      list.push({ kind: "xbar-r", chartLabel: "X̄ (Moyennes)", rule: "Point hors limites de contrôle", ruleNumber: null, pointIndex: i, value: xbarR.subgroupMeans[i], type: "OOC" })
     );
     xbarR.westernElectric.forEach((r) =>
-      list.push({
-        kind: "xbar-r",
-        chartLabel: "X̄ (Moyennes)",
-        rule: r.description,
-        ruleNumber: r.rule,
-        pointIndex: r.index,
-        value: xbarR.subgroupMeans[r.index],
-        type: "WE",
-      })
+      list.push({ kind: "xbar-r", chartLabel: "X̄ (Moyennes)", rule: r.description, ruleNumber: r.rule, pointIndex: r.index, value: xbarR.subgroupMeans[r.index], type: "WE" })
     );
     xbarS.outOfControl.forEach((i) =>
-      list.push({
-        kind: "xbar-s",
-        chartLabel: "X̄ (X̄-S)",
-        rule: "Point hors limites",
-        ruleNumber: null,
-        pointIndex: i,
-        value: xbarS.subgroupMeans[i],
-        type: "OOC",
-      })
+      list.push({ kind: "xbar-s", chartLabel: "X̄ (X̄-S)", rule: "Point hors limites", ruleNumber: null, pointIndex: i, value: xbarS.subgroupMeans[i], type: "OOC" })
     );
     imr.outOfControl.forEach((i) =>
-      list.push({
-        kind: "i-mr",
-        chartLabel: "Individuals (I)",
-        rule: "Point hors limites",
-        ruleNumber: null,
-        pointIndex: i,
-        value: imr.values[i],
-        type: "OOC",
-      })
+      list.push({ kind: "i-mr", chartLabel: "Individuals (I)", rule: "Point hors limites", ruleNumber: null, pointIndex: i, value: imr.values[i], type: "OOC" })
     );
     return list;
   }, [xbarR, xbarS, imr]);
 
   // For zoom view: subset of subgroupMeans around pointIndex
   const zoomData = useMemo(() => {
-    if (!zoomTarget) return null;
-    const W = 6; // window before/after
+    if (!zoomTarget || !xbarR || !xbarS || !imr) return null;
+    const W = 6;
     if (zoomTarget.kind === "xbar-r") {
       const start = Math.max(0, zoomTarget.index - W);
       const end = Math.min(xbarR.subgroupMeans.length, zoomTarget.index + W + 1);
-      return {
-        values: xbarR.subgroupMeans.slice(start, end),
-        ucl: xbarR.uclX,
-        cl: xbarR.clX,
-        lcl: xbarR.lclX,
-        outOfControl: [zoomTarget.index - start],
-        startOffset: start,
-        chartLabel: "X̄-R · Moyennes",
-      };
+      return { values: xbarR.subgroupMeans.slice(start, end), ucl: xbarR.uclX, cl: xbarR.clX, lcl: xbarR.lclX, outOfControl: [zoomTarget.index - start], startOffset: start, chartLabel: "X̄-R · Moyennes" };
     }
     if (zoomTarget.kind === "xbar-s") {
       const start = Math.max(0, zoomTarget.index - W);
       const end = Math.min(xbarS.subgroupMeans.length, zoomTarget.index + W + 1);
-      return {
-        values: xbarS.subgroupMeans.slice(start, end),
-        ucl: xbarS.uclX,
-        cl: xbarS.clX,
-        lcl: xbarS.lclX,
-        outOfControl: [zoomTarget.index - start],
-        startOffset: start,
-        chartLabel: "X̄-S · Moyennes",
-      };
+      return { values: xbarS.subgroupMeans.slice(start, end), ucl: xbarS.uclX, cl: xbarS.clX, lcl: xbarS.lclX, outOfControl: [zoomTarget.index - start], startOffset: start, chartLabel: "X̄-S · Moyennes" };
     }
     const start = Math.max(0, zoomTarget.index - W);
     const end = Math.min(imr.values.length, zoomTarget.index + W + 1);
-    return {
-      values: imr.values.slice(start, end),
-      ucl: imr.uclI,
-      cl: imr.clI,
-      lcl: imr.lclI,
-      outOfControl: [zoomTarget.index - start],
-      startOffset: start,
-      chartLabel: "I-MR · Individuals",
-    };
+    return { values: imr.values.slice(start, end), ucl: imr.uclI, cl: imr.clI, lcl: imr.lclI, outOfControl: [zoomTarget.index - start], startOffset: start, chartLabel: "I-MR · Individuals" };
   }, [zoomTarget, xbarR, xbarS, imr]);
+
+  if (!hasData || !xbarR || !xbarS || !imr) {
+    return (
+      <AppLayout title="Cartes SPC" subtitle={`${specs.projectName} · Contrôle statistique du procédé`}>
+        <EmptyState
+          title="Aucune donnée SPC"
+          message="Importez votre fichier Excel SPC/Capabilité (par ex. colonnes M1..Mn par sous-groupe) depuis l'onglet « Données ». Les cartes X̄-R, X̄-S et I-MR seront générées automatiquement à partir de vos mesures."
+        />
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout title="Cartes SPC" subtitle={`${specs.projectName} · Contrôle statistique du procédé`}>
-      {usingDemo && (
-        <div className="mb-5 px-4 py-3 rounded-md bg-info/10 border border-info/30 flex items-center justify-between gap-3">
-          <div className="text-sm text-info">
-            📊 Démonstration. Importez un fichier et configurez le mappage des colonnes pour analyser vos mesures.
-          </div>
-          <Link to="/data">
-            <Button size="sm" className="gap-1.5"><Wand2 className="w-3.5 h-3.5" />Assistant</Button>
-          </Link>
-        </div>
-      )}
 
       <Tabs defaultValue="xbar-r">
         <TabsList className="mb-4">

@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
+import { EmptyState } from "@/components/dashboard/EmptyState";
 import { useAppStore, appActions } from "@/store/app-store";
 import { computeCapability, buildHistogram, normalPdf } from "@/lib/spc-engine";
-import { DEMO_SUBGROUPS } from "@/lib/demo-data";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { SpecsPanel } from "@/components/specs/SpecsPanel";
@@ -11,58 +11,65 @@ import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Respons
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 
 const CapabilityPage = () => {
-  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const spcSheet = useAppStore(() => appActions.getSheetForKind("spc"));
   const specs = useAppStore((s) => s.specs);
   const mapping = useAppStore((s) => s.mapping);
   const perColumnSpecs = useAppStore((s) => s.perColumnSpecs);
 
-  // Multi-column: per-column results
   const columns = mapping.measureCols.length > 0 ? mapping.measureCols : [];
   const [selectedCol, setSelectedCol] = useState<string | null>(columns[0] ?? null);
-
   const activeCol = selectedCol ?? columns[0] ?? null;
 
-  // Per-column results
   const perColumn = useMemo(() => {
-    if (!sheet || columns.length === 0) return [];
+    if (!spcSheet || columns.length === 0) return [];
     return columns.map((c) => {
-      const values = sheet.rows.map((r) => Number(r[c])).filter((v) => !isNaN(v));
+      const values = spcSheet.rows.map((r) => Number(r[c])).filter((v) => !isNaN(v));
       const eff = perColumnSpecs[c] ?? { lsl: specs.lsl, usl: specs.usl, target: specs.target };
       const cap = computeCapability(values, eff.lsl, eff.usl, eff.target, specs.subgroupSize);
       return { col: c, values, spec: eff, cap, hasOverride: !!perColumnSpecs[c] };
     });
-  }, [sheet, columns, perColumnSpecs, specs]);
+  }, [spcSheet, columns, perColumnSpecs, specs]);
 
-  // Active values + capability for chart
-  const { values, cap, eff } = useMemo(() => {
+  const hasData = perColumn.length > 0 && perColumn.some((p) => p.values.length > 0);
+
+  const active = useMemo(() => {
     if (activeCol && perColumn.length > 0) {
       const found = perColumn.find((p) => p.col === activeCol);
-      if (found) return { values: found.values, cap: found.cap, eff: found.spec };
+      if (found && found.values.length > 0) return found;
     }
-    const fallback = DEMO_SUBGROUPS.flat();
-    return {
-      values: fallback,
-      cap: computeCapability(fallback, specs.lsl, specs.usl, specs.target, specs.subgroupSize),
-      eff: { lsl: specs.lsl, usl: specs.usl, target: specs.target },
-    };
-  }, [activeCol, perColumn, specs]);
+    return perColumn.find((p) => p.values.length > 0) ?? null;
+  }, [activeCol, perColumn]);
 
   const hist = useMemo(() => {
-    const h = buildHistogram(values, 25);
-    const sigma = cap.stdLongTerm || 0.001;
+    if (!active) return [];
+    const h = buildHistogram(active.values, 25);
+    const sigma = active.cap.stdLongTerm || 0.001;
     const maxCount = Math.max(...h.map((d) => d.count), 1);
-    const maxPdf = normalPdf(cap.mean, cap.mean, sigma);
-    return h.map((d) => ({ ...d, pdf: maxPdf > 0 ? (normalPdf(d.bin, cap.mean, sigma) / maxPdf) * maxCount : 0 }));
-  }, [values, cap]);
+    const maxPdf = normalPdf(active.cap.mean, active.cap.mean, sigma);
+    return h.map((d) => ({ ...d, pdf: maxPdf > 0 ? (normalPdf(d.bin, active.cap.mean, sigma) / maxPdf) * maxCount : 0 }));
+  }, [active]);
 
+  if (!hasData || !active) {
+    return (
+      <AppLayout title="Capabilité Process" subtitle={`${specs.projectName} · Cp · Cpk · Pp · Ppk · Cpm`}>
+        <div className="mb-5"><SpecsPanel /></div>
+        <EmptyState
+          title="Aucune donnée de capabilité"
+          message="Importez votre fichier Excel SPC/Capabilité depuis l'onglet « Données ». Les indices Cp, Cpk, Pp, Ppk et l'histogramme avec courbe normale seront calculés directement à partir de vos mesures."
+        />
+      </AppLayout>
+    );
+  }
+
+  const cap = active.cap;
+  const eff = active.spec;
+  const values = active.values;
   const StatusIcon = cap.status === "capable" ? CheckCircle2 : cap.status === "improve" ? AlertTriangle : XCircle;
   const statusColor = cap.status === "capable" ? "text-success" : cap.status === "improve" ? "text-warning" : "text-destructive";
 
   return (
     <AppLayout title="Capabilité Process" subtitle={`${specs.projectName} · Cp · Cpk · Pp · Ppk · Cpm`}>
-      <div className="mb-5">
-        <SpecsPanel />
-      </div>
+      <div className="mb-5"><SpecsPanel /></div>
 
       {perColumn.length > 1 && (
         <SectionCard title="Synthèse multi-colonnes" className="mb-5">
@@ -88,7 +95,7 @@ const CapabilityPage = () => {
                   return (
                     <tr
                       key={p.col}
-                      className={`border-b border-border/50 hover:bg-muted/30 cursor-pointer ${activeCol === p.col ? "bg-accent/30" : ""}`}
+                      className={`border-b border-border/50 hover:bg-muted/30 cursor-pointer ${active.col === p.col ? "bg-accent/30" : ""}`}
                       onClick={() => setSelectedCol(p.col)}
                     >
                       <td className="px-2 py-1.5 font-medium flex items-center gap-2">
@@ -115,30 +122,24 @@ const CapabilityPage = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <SectionCard title="Source de données">
-          {sheet ? (
-            <>
-              <div className="text-xs text-muted-foreground mb-2">
-                Mappage actif : <strong className="text-foreground">{mapping.measureCols.join(", ") || "—"}</strong>
-              </div>
-              <Label className="text-xs">Colonne analysée</Label>
-              <select
-                value={activeCol ?? ""}
-                onChange={(e) => setSelectedCol(e.target.value || null)}
-                className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm"
-              >
-                {columns.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
-              <div className="mt-3 text-xs text-muted-foreground">N (mesures) : <strong className="text-foreground">{values.length}</strong></div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                Spec utilisée : LSL={eff.lsl} · Cible={eff.target} · USL={eff.usl}
-              </div>
-            </>
-          ) : (
-            <div className="text-sm text-muted-foreground">Aucun fichier importé. Données de démonstration utilisées.</div>
-          )}
+          <div className="text-xs text-muted-foreground mb-2">
+            Mappage actif : <strong className="text-foreground">{mapping.measureCols.join(", ") || "—"}</strong>
+          </div>
+          <Label className="text-xs">Colonne analysée</Label>
+          <select
+            value={active.col}
+            onChange={(e) => setSelectedCol(e.target.value || null)}
+            className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm"
+          >
+            {columns.map((h) => <option key={h} value={h}>{h}</option>)}
+          </select>
+          <div className="mt-3 text-xs text-muted-foreground">N (mesures) : <strong className="text-foreground">{values.length}</strong></div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Spec utilisée : LSL={eff.lsl} · Cible={eff.target} · USL={eff.usl}
+          </div>
         </SectionCard>
 
-        <SectionCard title={`Indicateurs ${activeCol ? `· ${activeCol}` : ""}`} className="lg:col-span-2">
+        <SectionCard title={`Indicateurs · ${active.col}`} className="lg:col-span-2">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Idx label="Cp" value={cap.cp} />
             <Idx label="Cpk" value={cap.cpk} highlight />

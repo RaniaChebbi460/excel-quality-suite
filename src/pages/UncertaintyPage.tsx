@@ -1,24 +1,26 @@
 import { useMemo, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
+import { EmptyState } from "@/components/dashboard/EmptyState";
 import { useAppStore, appActions } from "@/store/app-store";
 import { computeUncertaintyTypeA, combineUncertainties, UncertaintyComponent } from "@/lib/spc-engine";
-import { DEMO_SUBGROUPS } from "@/lib/demo-data";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 
 const UncertaintyPage = () => {
-  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const spcSheet = useAppStore(() => appActions.getSheetForKind("spc"));
+  const msaSheet = useAppStore(() => appActions.getSheetForKind("msa"));
+  const sheet = spcSheet ?? msaSheet;
   const mapping = useAppStore((s) => s.mapping);
   const [overrideCol, setOverrideCol] = useState<string | null>(null);
 
   const values = useMemo(() => {
-    const col = overrideCol ?? mapping.measureCols[0];
+    const col = overrideCol ?? mapping.measureCols[0] ?? mapping.valueCol ?? null;
     if (sheet && col) return sheet.rows.map((r) => Number(r[col])).filter((v) => !isNaN(v));
-    return DEMO_SUBGROUPS.flat();
-  }, [sheet, overrideCol, mapping.measureCols]);
+    return [];
+  }, [sheet, overrideCol, mapping.measureCols, mapping.valueCol]);
 
   const [k, setK] = useState(2);
   const [components, setComponents] = useState<UncertaintyComponent[]>([
@@ -34,6 +36,17 @@ const UncertaintyPage = () => {
   const removeComponent = (i: number) => setComponents(components.filter((_, idx) => idx !== i));
   const updateComponent = (i: number, patch: Partial<UncertaintyComponent>) =>
     setComponents(components.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+
+  if (values.length === 0) {
+    return (
+      <AppLayout title="Incertitude de mesure" subtitle="Type A · Type B · Combinée · Élargie">
+        <EmptyState
+          title="Aucune donnée pour l'incertitude"
+          message="Importez un fichier Excel depuis l'onglet « Données ». L'incertitude Type A sera calculée à partir de vos mesures, et vous pourrez ajouter les composantes Type B."
+        />
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout title="Incertitude de mesure" subtitle="Type A · Type B · Combinée · Élargie">
