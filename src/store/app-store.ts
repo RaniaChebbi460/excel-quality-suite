@@ -263,19 +263,37 @@ export const appActions = {
     const spcDet = detections.find((d) => d.kind === "spc");
     const msaDet = detections.find((d) => d.kind === "msa");
 
+    // Validate that previously-mapped columns still exist in the new dataset.
+    const allHeaders = new Set<string>();
+    files.forEach((file) => file.sheets.forEach((s) => s.headers.forEach((h) => allHeaders.add(h))));
+    const stillValid = (col: string | null | undefined) => !!col && allHeaders.has(col);
+    const measuresStillValid =
+      currentMapping.measureCols.length > 0 && currentMapping.measureCols.every((c) => allHeaders.has(c));
+
+    const detectedMeasures = spcDet?.map.measureCols ?? msaDet?.map.measureCols ?? [];
+    const detectedPart = msaDet?.map.partCol ?? null;
+    const detectedOperator = msaDet?.map.operatorCol ?? null;
+    const detectedTrial = msaDet?.map.trialCol ?? null;
+    const detectedValue = msaDet?.map.valueCol ?? null;
+
     const nextMapping: ColumnMapping = {
       ...currentMapping,
-      // SPC fields from SPC sheet (only if user hasn't already mapped)
-      measureCols:
-        currentMapping.measureCols.length > 0
-          ? currentMapping.measureCols
-          : spcDet?.map.measureCols ?? msaDet?.map.measureCols ?? [],
-      // MSA fields from MSA sheet
-      partCol: currentMapping.partCol ?? msaDet?.map.partCol ?? null,
-      operatorCol: currentMapping.operatorCol ?? msaDet?.map.operatorCol ?? null,
-      trialCol: currentMapping.trialCol ?? msaDet?.map.trialCol ?? null,
-      valueCol: currentMapping.valueCol ?? msaDet?.map.valueCol ?? null,
+      // Re-detect if previous mapping is invalid against new dataset.
+      measureCols: measuresStillValid ? currentMapping.measureCols : detectedMeasures,
+      partCol: stillValid(currentMapping.partCol) ? currentMapping.partCol : detectedPart,
+      operatorCol: stillValid(currentMapping.operatorCol) ? currentMapping.operatorCol : detectedOperator,
+      trialCol: stillValid(currentMapping.trialCol) ? currentMapping.trialCol : detectedTrial,
+      valueCol: stillValid(currentMapping.valueCol) ? currentMapping.valueCol : detectedValue,
       validated: true, // auto-detected mapping is considered valid until user changes it
+    };
+
+    // Expose the detection summary so callers (UI) can display feedback.
+    (appActions as any)._lastDetection = {
+      spc: spcDet ? { fileIdx: spcDet.fileIdx, sheetIdx: spcDet.sheetIdx, measures: detectedMeasures.length } : null,
+      msa: msaDet
+        ? { fileIdx: msaDet.fileIdx, sheetIdx: msaDet.sheetIdx, part: detectedPart, operator: detectedOperator }
+        : null,
+      unknown: detections.every((d) => d.kind === "unknown"),
     };
 
     // Pick a sensible active sheet (prefer SPC sheet for the preview)
