@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
 import { ControlChart } from "@/components/charts/ControlChart";
@@ -19,6 +19,16 @@ const SPCPage = () => {
 
   const [zoomTarget, setZoomTarget] = useState<{ kind: ChartKind; index: number } | null>(null);
   const xbarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    console.info("[SPCPage] render state", {
+      sheetName: spcSheet?.name,
+      headers: spcSheet?.headers,
+      measureCols: mapping.measureCols,
+      sheetRows: spcSheet?.rows.length,
+      subgroupSize: specs.subgroupSize,
+    });
+  }, [spcSheet, mapping.measureCols, specs.subgroupSize]);
 
   const subgroups: number[][] = useMemo(() => {
     if (!spcSheet || mapping.measureCols.length === 0) return [];

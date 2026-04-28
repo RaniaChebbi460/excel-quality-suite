@@ -19,7 +19,10 @@ export async function parseExcelFile(file: File): Promise<ParsedFile> {
   const sheets: ParsedSheet[] = wb.SheetNames.map((name) => {
     const ws = wb.Sheets[name];
     const matrix = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: null }) as any[][];
-    const headers = (matrix[0] ?? []).map((h, i) => (h == null || h === "" ? `Col${i + 1}` : String(h)));
+    const headers = (matrix[0] ?? []).map((h, i) => {
+      const header = h == null || h === "" ? `Col${i + 1}` : String(h).trim();
+      return header;
+    });
     const rows = matrix.slice(1).map((r) => {
       const obj: Record<string, any> = {};
       headers.forEach((h, i) => (obj[h] = r?.[i] ?? null));

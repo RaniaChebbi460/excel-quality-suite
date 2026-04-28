@@ -61,6 +61,7 @@ export const ControlChart = ({
               const isOoc = payload.isOoc;
               return (
                 <Dot
+                  key={`dot-${payload?.i ?? payload?.index ?? Math.random()}`}
                   cx={cx}
                   cy={cy}
                   r={isOoc ? 5 : 3}

@@ -9,7 +9,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, BarChart, Ba
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 
 const MSAPage = () => {
-  const msaSheet = useAppStore(() => appActions.getSheetForKind("msa"));
+  const msaSheet = useAppStore((s) => appActions.getSheetForKind("msa"));
   const mapping = useAppStore((s) => s.mapping);
 
   const [colPart, setColPart] = useState<string>(mapping.partCol ?? "");
@@ -26,20 +26,42 @@ const MSAPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapping.partCol, mapping.operatorCol, mapping.trialCol, mapping.valueCol]);
 
+  const parseNumberValue = (value: any): number => {
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().replace(/,/g, ".");
+      return Number(normalized);
+    }
+    return NaN;
+  };
+
   const entries: MSAEntry[] = useMemo(() => {
     if (!msaSheet || !colPart || !colOp || !colVal) return [];
     return msaSheet.rows
       .map((r, i) => ({
         part: r[colPart],
         operator: r[colOp],
-        trial: colTrial ? Number(r[colTrial]) : i,
-        value: Number(r[colVal]),
+        trial: colTrial ? parseNumberValue(r[colTrial]) : i,
+        value: parseNumberValue(r[colVal]),
       }))
       .filter((e) => e.part != null && e.operator != null && !isNaN(e.value));
   }, [msaSheet, colPart, colOp, colTrial, colVal]);
 
   const hasData = entries.length > 0;
   const msa = useMemo(() => (hasData ? computeMSA(entries) : null), [hasData, entries]);
+
+  useEffect(() => {
+    console.debug("[MSAPage] mapping state", {
+      hasMsaSheet: !!msaSheet,
+      headers: msaSheet?.headers,
+      colPart,
+      colOp,
+      colTrial,
+      colVal,
+      entriesCount: entries.length,
+      hasData,
+    });
+  }, [msaSheet, colPart, colOp, colTrial, colVal, entries.length, hasData]);
 
   if (!hasData || !msa) {
     return (

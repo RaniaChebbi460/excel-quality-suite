@@ -20,12 +20,17 @@ export const EmptyState = ({
     <h3 className="text-lg font-semibold text-foreground mb-2">{title}</h3>
     <p className="text-sm text-muted-foreground max-w-md mb-5 leading-relaxed">{message}</p>
     {showImportButton && (
-      <Link to="/data">
-        <Button size="sm" className="gap-2">
+      <Button
+        asChild
+        size="sm"
+        className="gap-2"
+        onClick={() => console.info("[EmptyState] import button clicked", { route: "/data" })}
+      >
+        <Link to="/data">
           <Upload className="w-4 h-4" />
           Importer des fichiers Excel
-        </Button>
-      </Link>
+        </Link>
+      </Button>
     )}
   </div>
 );

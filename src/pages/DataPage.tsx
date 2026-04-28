@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { Upload, FileSpreadsheet, Trash2, Eye, Wand2, Layers, CheckCircle2 } fro
 import { toast } from "sonner";
 import { MappingWizard } from "@/components/wizard/MappingWizard";
 import { SpecsPanel } from "@/components/specs/SpecsPanel";
+import DetectionTest from "@/components/DetectionTest";
 import {
   Select,
   SelectContent,
@@ -17,6 +19,7 @@ import {
 } from "@/components/ui/select";
 
 const DataPage = () => {
+  const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const files = useAppStore((s) => s.files);
   const activeFileIndex = useAppStore((s) => s.activeFileIndex);
@@ -31,30 +34,58 @@ const DataPage = () => {
   const displaySheet = showMerged && mergedSheet ? mergedSheet : activeSheet;
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.info("[DataPage] handleUpload called", { files: e.target.files?.length });
     const list = e.target.files;
-    if (!list) return;
+    if (!list) {
+      console.warn("[DataPage] handleUpload: aucun fichier sélectionné");
+      return;
+    }
+    console.info("[DataPage] selected files", Array.from(list).map((f) => f.name));
     let imported = 0;
     for (const f of Array.from(list)) {
       try {
         const parsed = await parseExcelFile(f);
+        console.info("[DataPage] parsed file", f.name, { sheetCount: parsed.sheets.length });
         appActions.addFile(parsed);
         imported++;
       } catch (err: any) {
+        console.error("[DataPage] import error", f.name, err);
         toast.error("Erreur d'import", { description: err.message });
       }
     }
     if (imported > 0) {
       const det = (appActions as any)._lastDetection as
-        | { spc: any; msa: any; unknown: boolean }
+        | { dashboard: any; spcCard: any; msaRR: any; capability: any; uncertainty: any; spc: any; msa: any; unknown: boolean }
         | undefined;
+      console.info("[DataPage.handleUpload] detected summary", det);
+      console.info("[DataPage.handleUpload] msa sheet", appActions.getSheetForKind("msa"));
       const parts: string[] = [];
+
+      if (det?.dashboard) parts.push("Tableau de bord");
+      if (det?.spcCard) parts.push("Carte SPC");
+      if (det?.msaRR) parts.push("MSA R&R");
+      if (det?.capability) parts.push("Capabilité");
+      if (det?.uncertainty) parts.push("Incertitude");
       if (det?.spc) parts.push(`SPC : ${det.spc.measures} colonne(s) de mesure`);
       if (det?.msa) parts.push(`MSA : Pièce/Opérateur détectés`);
+
       const desc = parts.length
         ? `Mappage automatique appliqué — ${parts.join(" · ")}. Calculs prêts.`
-        : "Aucune structure SPC/MSA reconnue — utilisez l'assistant de mappage.";
+        : "Aucune structure reconnue — utilisez l'assistant de mappage.";
+
       if (parts.length) {
         toast.success(`${imported} fichier(s) importé(s)`, { description: desc });
+
+        // Auto-navigate to appropriate page based on detected type
+        setTimeout(() => {
+          if (det?.dashboard) navigate("/");
+          else if (det?.spcCard || det?.spc) navigate("/spc");
+          else if (det?.msaRR || det?.msa) navigate("/msa");
+          else if (det?.capability) navigate("/capability");
+          else if (det?.uncertainty) navigate("/uncertainty");
+          else navigate("/data"); // Stay on data page for unknown types
+        }, 1500); // Small delay to let user see the toast
+
       } else {
         toast.warning(`${imported} fichier(s) importé(s)`, { description: desc });
       }
@@ -67,7 +98,10 @@ const DataPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <SectionCard title="Importer un ou plusieurs fichiers" className="lg:col-span-2">
           <div
-            onClick={() => inputRef.current?.click()}
+            onClick={() => {
+              console.info("[DataPage] import drop area clicked");
+              inputRef.current?.click();
+            }}
             className="border-2 border-dashed border-border rounded-xl p-10 text-center cursor-pointer hover:border-primary hover:bg-accent/30 transition-colors"
           >
             <Upload className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
@@ -150,6 +184,10 @@ const DataPage = () => {
 
       <div className="mb-5">
         <SpecsPanel />
+      </div>
+
+      <div className="mb-5">
+        <DetectionTest />
       </div>
 
       {displaySheet && (

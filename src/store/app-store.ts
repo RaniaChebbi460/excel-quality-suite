@@ -251,17 +251,33 @@ export const appActions = {
     });
     const merged = mergeFiles(files, plan);
 
+    console.groupCollapsed("[appActions.addFile] imported files", files.map((f) => f.name));
+    console.info("[appActions.addFile] currentMapping", store.get().mapping);
+    console.info("[appActions.addFile] enabled sheets", plan.enabledSheets);
+
     // Auto-detect mapping across ALL sheets of all files.
     const currentMapping = store.get().mapping;
-    const detections: { fileIdx: number; sheetIdx: number; kind: DetectedKind; map: any }[] = [];
+    const detections: { fileIdx: number; sheetIdx: number; kind: DetectedKind; map: any; confidence: number }[] = [];
     files.forEach((file, fi) =>
       file.sheets.forEach((s, si) => {
         const d = detectSheet(s);
-        detections.push({ fileIdx: fi, sheetIdx: si, kind: d.kind, map: d.mapping });
+        detections.push({ fileIdx: fi, sheetIdx: si, kind: d.kind, map: d.mapping, confidence: d.confidence });
       })
     );
-    const spcDet = detections.find((d) => d.kind === "spc");
-    const msaDet = detections.find((d) => d.kind === "msa");
+
+    // Find detections by type with highest confidence
+    const getBestDetection = (kind: DetectedKind) => {
+      const matches = detections.filter(d => d.kind === kind);
+      return matches.sort((a, b) => b.confidence - a.confidence)[0] || null;
+    };
+
+    const dashboardDet = getBestDetection("dashboard");
+    const spcCardDet = getBestDetection("spc-card");
+    const msaRRDet = getBestDetection("msa-rr");
+    const capabilityDet = getBestDetection("capability");
+    const uncertaintyDet = getBestDetection("uncertainty");
+    const spcDet = getBestDetection("spc");
+    const msaDet = getBestDetection("msa");
 
     // Validate that previously-mapped columns still exist in the new dataset.
     const allHeaders = new Set<string>();
@@ -269,17 +285,26 @@ export const appActions = {
     const stillValid = (col: string | null | undefined) => !!col && allHeaders.has(col);
     const measuresStillValid =
       currentMapping.measureCols.length > 0 && currentMapping.measureCols.every((c) => allHeaders.has(c));
+    const measureColsDiffer = (a: string[], b: string[]) =>
+      a.length !== b.length || a.some((value, index) => value !== b[index]);
 
-    const detectedMeasures = spcDet?.map.measureCols ?? msaDet?.map.measureCols ?? [];
-    const detectedPart = msaDet?.map.partCol ?? null;
-    const detectedOperator = msaDet?.map.operatorCol ?? null;
-    const detectedTrial = msaDet?.map.trialCol ?? null;
-    const detectedValue = msaDet?.map.valueCol ?? null;
+    const detectedMeasures = spcDet?.map.measureCols ?? msaDet?.map.measureCols ?? msaRRDet?.map.measureCols ?? [];
+    const detectedPart = msaDet?.map.partCol ?? msaRRDet?.map.partCol ?? null;
+    const detectedOperator = msaDet?.map.operatorCol ?? msaRRDet?.map.operatorCol ?? null;
+    const detectedTrial = msaDet?.map.trialCol ?? msaRRDet?.map.trialCol ?? null;
+    const detectedValue = msaDet?.map.valueCol ?? msaRRDet?.map.valueCol ?? null;
+
+    const nextMeasureCols = spcDet
+      ? spcDet.map.measureCols
+      : measuresStillValid
+      ? currentMapping.measureCols
+      : detectedMeasures;
 
     const nextMapping: ColumnMapping = {
       ...currentMapping,
-      // Re-detect if previous mapping is invalid against new dataset.
-      measureCols: measuresStillValid ? currentMapping.measureCols : detectedMeasures,
+      // Re-detect if previous mapping is invalid against new dataset,
+      // or if a more specific SPC detection is available.
+      measureCols: nextMeasureCols,
       partCol: stillValid(currentMapping.partCol) ? currentMapping.partCol : detectedPart,
       operatorCol: stillValid(currentMapping.operatorCol) ? currentMapping.operatorCol : detectedOperator,
       trialCol: stillValid(currentMapping.trialCol) ? currentMapping.trialCol : detectedTrial,
@@ -287,17 +312,36 @@ export const appActions = {
       validated: true, // auto-detected mapping is considered valid until user changes it
     };
 
+    console.info("[appActions.addFile] detections", detections);
+    console.info("[appActions.addFile] detected types", {
+      dashboard: dashboardDet,
+      spcCard: spcCardDet,
+      msaRR: msaRRDet,
+      capability: capabilityDet,
+      uncertainty: uncertaintyDet,
+      spc: spcDet,
+      msa: msaDet,
+    });
+
     // Expose the detection summary so callers (UI) can display feedback.
     (appActions as any)._lastDetection = {
+      dashboard: dashboardDet ? { fileIdx: dashboardDet.fileIdx, sheetIdx: dashboardDet.sheetIdx } : null,
+      spcCard: spcCardDet ? { fileIdx: spcCardDet.fileIdx, sheetIdx: spcCardDet.sheetIdx } : null,
+      msaRR: msaRRDet ? { fileIdx: msaRRDet.fileIdx, sheetIdx: msaRRDet.sheetIdx, part: detectedPart, operator: detectedOperator } : null,
+      capability: capabilityDet ? { fileIdx: capabilityDet.fileIdx, sheetIdx: capabilityDet.sheetIdx } : null,
+      uncertainty: uncertaintyDet ? { fileIdx: uncertaintyDet.fileIdx, sheetIdx: uncertaintyDet.sheetIdx } : null,
       spc: spcDet ? { fileIdx: spcDet.fileIdx, sheetIdx: spcDet.sheetIdx, measures: detectedMeasures.length } : null,
-      msa: msaDet
-        ? { fileIdx: msaDet.fileIdx, sheetIdx: msaDet.sheetIdx, part: detectedPart, operator: detectedOperator }
-        : null,
+      msa: msaDet ? { fileIdx: msaDet.fileIdx, sheetIdx: msaDet.sheetIdx, part: detectedPart, operator: detectedOperator } : null,
       unknown: detections.every((d) => d.kind === "unknown"),
     };
 
-    // Pick a sensible active sheet (prefer SPC sheet for the preview)
-    const preferred = spcDet ?? msaDet ?? { fileIdx: files.length - 1, sheetIdx: 0 };
+    // Pick a sensible active sheet (prefer most specific types first)
+    const preferredOrder = [msaRRDet, spcCardDet, dashboardDet, capabilityDet, uncertaintyDet, spcDet, msaDet];
+    const preferred = preferredOrder.find(d => d !== null) ?? { fileIdx: files.length - 1, sheetIdx: 0 };
+
+    console.info("[appActions.addFile] preferred sheet", preferred);
+    console.info("[appActions.addFile] nextMapping", nextMapping);
+    console.groupEnd();
 
     store.set({
       files,
@@ -335,11 +379,28 @@ export const appActions = {
   // Find the sheet that best matches a given analysis kind (auto-detected).
   getSheetForKind: (kind: "spc" | "msa"): ParsedSheet | null => {
     const s = store.get();
+    console.info("[getSheetForKind] kind", kind, "fileCount", s.files.length);
+    let fallbackSheet: ParsedSheet | null = null;
     for (const f of s.files) {
       for (const sh of f.sheets) {
-        if (detectSheet(sh).kind === kind) return sh;
+        const detected = detectSheet(sh).kind;
+        console.info("[getSheetForKind] sheet", sh.name, "detected", detected);
+        if (detected === kind || (kind === "msa" && detected === "msa-rr")) return sh;
+        if (kind === "msa" && !fallbackSheet && s.mapping.partCol && s.mapping.operatorCol) {
+          const hasPart = sh.headers.includes(s.mapping.partCol);
+          const hasOperator = sh.headers.includes(s.mapping.operatorCol);
+          const hasValue = !s.mapping.valueCol || sh.headers.includes(s.mapping.valueCol);
+          if (hasPart && hasOperator && hasValue) {
+            fallbackSheet = sh;
+          }
+        }
       }
     }
+    if (fallbackSheet) {
+      console.info("[getSheetForKind] fallback to mapped MSA sheet", fallbackSheet.name);
+      return fallbackSheet;
+    }
+    console.info("[getSheetForKind] no sheet found for kind", kind);
     return null;
   },
   hasAnyData: (): boolean => store.get().files.length > 0,
