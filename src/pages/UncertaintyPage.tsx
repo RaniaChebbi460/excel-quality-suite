@@ -37,6 +37,17 @@ const UncertaintyPage = () => {
   const updateComponent = (i: number, patch: Partial<UncertaintyComponent>) =>
     setComponents(components.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
 
+  if (values.length === 0) {
+    return (
+      <AppLayout title="Incertitude de mesure" subtitle="Type A · Type B · Combinée · Élargie">
+        <EmptyState
+          title="Aucune donnée pour l'incertitude"
+          message="Importez un fichier Excel depuis l'onglet « Données ». L'incertitude Type A sera calculée à partir de vos mesures, et vous pourrez ajouter les composantes Type B."
+        />
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout title="Incertitude de mesure" subtitle="Type A · Type B · Combinée · Élargie">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
