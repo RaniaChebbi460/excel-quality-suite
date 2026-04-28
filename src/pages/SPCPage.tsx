@@ -69,59 +69,36 @@ const SPCPage = () => {
 
   // For zoom view: subset of subgroupMeans around pointIndex
   const zoomData = useMemo(() => {
-    if (!zoomTarget) return null;
-    const W = 6; // window before/after
+    if (!zoomTarget || !xbarR || !xbarS || !imr) return null;
+    const W = 6;
     if (zoomTarget.kind === "xbar-r") {
       const start = Math.max(0, zoomTarget.index - W);
       const end = Math.min(xbarR.subgroupMeans.length, zoomTarget.index + W + 1);
-      return {
-        values: xbarR.subgroupMeans.slice(start, end),
-        ucl: xbarR.uclX,
-        cl: xbarR.clX,
-        lcl: xbarR.lclX,
-        outOfControl: [zoomTarget.index - start],
-        startOffset: start,
-        chartLabel: "X̄-R · Moyennes",
-      };
+      return { values: xbarR.subgroupMeans.slice(start, end), ucl: xbarR.uclX, cl: xbarR.clX, lcl: xbarR.lclX, outOfControl: [zoomTarget.index - start], startOffset: start, chartLabel: "X̄-R · Moyennes" };
     }
     if (zoomTarget.kind === "xbar-s") {
       const start = Math.max(0, zoomTarget.index - W);
       const end = Math.min(xbarS.subgroupMeans.length, zoomTarget.index + W + 1);
-      return {
-        values: xbarS.subgroupMeans.slice(start, end),
-        ucl: xbarS.uclX,
-        cl: xbarS.clX,
-        lcl: xbarS.lclX,
-        outOfControl: [zoomTarget.index - start],
-        startOffset: start,
-        chartLabel: "X̄-S · Moyennes",
-      };
+      return { values: xbarS.subgroupMeans.slice(start, end), ucl: xbarS.uclX, cl: xbarS.clX, lcl: xbarS.lclX, outOfControl: [zoomTarget.index - start], startOffset: start, chartLabel: "X̄-S · Moyennes" };
     }
     const start = Math.max(0, zoomTarget.index - W);
     const end = Math.min(imr.values.length, zoomTarget.index + W + 1);
-    return {
-      values: imr.values.slice(start, end),
-      ucl: imr.uclI,
-      cl: imr.clI,
-      lcl: imr.lclI,
-      outOfControl: [zoomTarget.index - start],
-      startOffset: start,
-      chartLabel: "I-MR · Individuals",
-    };
+    return { values: imr.values.slice(start, end), ucl: imr.uclI, cl: imr.clI, lcl: imr.lclI, outOfControl: [zoomTarget.index - start], startOffset: start, chartLabel: "I-MR · Individuals" };
   }, [zoomTarget, xbarR, xbarS, imr]);
+
+  if (!hasData || !xbarR || !xbarS || !imr) {
+    return (
+      <AppLayout title="Cartes SPC" subtitle={`${specs.projectName} · Contrôle statistique du procédé`}>
+        <EmptyState
+          title="Aucune donnée SPC"
+          message="Importez votre fichier Excel SPC/Capabilité (par ex. colonnes M1..Mn par sous-groupe) depuis l'onglet « Données ». Les cartes X̄-R, X̄-S et I-MR seront générées automatiquement à partir de vos mesures."
+        />
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout title="Cartes SPC" subtitle={`${specs.projectName} · Contrôle statistique du procédé`}>
-      {usingDemo && (
-        <div className="mb-5 px-4 py-3 rounded-md bg-info/10 border border-info/30 flex items-center justify-between gap-3">
-          <div className="text-sm text-info">
-            📊 Démonstration. Importez un fichier et configurez le mappage des colonnes pour analyser vos mesures.
-          </div>
-          <Link to="/data">
-            <Button size="sm" className="gap-1.5"><Wand2 className="w-3.5 h-3.5" />Assistant</Button>
-          </Link>
-        </div>
-      )}
 
       <Tabs defaultValue="xbar-r">
         <TabsList className="mb-4">
