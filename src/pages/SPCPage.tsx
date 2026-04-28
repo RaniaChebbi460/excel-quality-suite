@@ -36,11 +36,9 @@ const SPCPage = () => {
 
   const hasData = subgroups.length > 0;
 
-  const xbarR = useMemo(() => computeXbarR(subgroups), [subgroups]);
-  const xbarS = useMemo(() => computeXbarS(subgroups), [subgroups]);
-  const imr = useMemo(() => computeIMR(subgroups.flat()), [subgroups]);
-
-  const usingDemo = !sheet || mapping.measureCols.length === 0;
+  const xbarR = useMemo(() => (hasData ? computeXbarR(subgroups) : null), [hasData, subgroups]);
+  const xbarS = useMemo(() => (hasData ? computeXbarS(subgroups) : null), [hasData, subgroups]);
+  const imr = useMemo(() => (hasData ? computeIMR(subgroups.flat()) : null), [hasData, subgroups]);
 
   // Build anomalies table from all charts (X̄-R drives WE rules)
   const anomalies = useMemo(() => {
