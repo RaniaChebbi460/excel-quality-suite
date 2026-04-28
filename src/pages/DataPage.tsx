@@ -44,10 +44,20 @@ const DataPage = () => {
       }
     }
     if (imported > 0) {
-      toast.success(`${imported} fichier(s) importé(s)`, {
-        description:
-          imported > 1 ? "Fusion automatique des colonnes compatibles disponible." : "1 feuille active.",
-      });
+      const det = (appActions as any)._lastDetection as
+        | { spc: any; msa: any; unknown: boolean }
+        | undefined;
+      const parts: string[] = [];
+      if (det?.spc) parts.push(`SPC : ${det.spc.measures} colonne(s) de mesure`);
+      if (det?.msa) parts.push(`MSA : Pièce/Opérateur détectés`);
+      const desc = parts.length
+        ? `Mappage automatique appliqué — ${parts.join(" · ")}. Calculs prêts.`
+        : "Aucune structure SPC/MSA reconnue — utilisez l'assistant de mappage.";
+      if (parts.length) {
+        toast.success(`${imported} fichier(s) importé(s)`, { description: desc });
+      } else {
+        toast.warning(`${imported} fichier(s) importé(s)`, { description: desc });
+      }
     }
     if (inputRef.current) inputRef.current.value = "";
   };
