@@ -2,19 +2,18 @@ import { useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
 import { ControlChart } from "@/components/charts/ControlChart";
+import { EmptyState } from "@/components/dashboard/EmptyState";
 import { useAppStore, appActions } from "@/store/app-store";
 import { computeXbarR, computeXbarS, computeIMR } from "@/lib/spc-engine";
-import { DEMO_SUBGROUPS } from "@/lib/demo-data";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, CheckCircle2, Wand2, ZoomIn } from "lucide-react";
-import { Link } from "react-router-dom";
+import { AlertTriangle, CheckCircle2, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type ChartKind = "xbar-r" | "xbar-s" | "i-mr";
 
 const SPCPage = () => {
-  const sheet = useAppStore(() => appActions.getAnalysisSheet());
+  const spcSheet = useAppStore(() => appActions.getSheetForKind("spc"));
   const mapping = useAppStore((s) => s.mapping);
   const specs = useAppStore((s) => s.specs);
 
@@ -22,20 +21,20 @@ const SPCPage = () => {
   const xbarRef = useRef<HTMLDivElement>(null);
 
   const subgroups: number[][] = useMemo(() => {
-    if (sheet && mapping.measureCols.length > 0) {
-      if (mapping.measureCols.length >= 2) {
-        return sheet.rows
-          .map((r) => mapping.measureCols.map((c) => Number(r[c])))
-          .filter((row) => row.every((v) => !isNaN(v)));
-      }
-      const flat = sheet.rows.map((r) => Number(r[mapping.measureCols[0]])).filter((v) => !isNaN(v));
-      const n = Math.max(2, Math.min(10, specs.subgroupSize));
-      const groups: number[][] = [];
-      for (let i = 0; i + n <= flat.length; i += n) groups.push(flat.slice(i, i + n));
-      return groups.length > 0 ? groups : DEMO_SUBGROUPS;
+    if (!spcSheet || mapping.measureCols.length === 0) return [];
+    if (mapping.measureCols.length >= 2) {
+      return spcSheet.rows
+        .map((r) => mapping.measureCols.map((c) => Number(r[c])))
+        .filter((row) => row.every((v) => !isNaN(v)));
     }
-    return DEMO_SUBGROUPS;
-  }, [sheet, mapping.measureCols, specs.subgroupSize]);
+    const flat = spcSheet.rows.map((r) => Number(r[mapping.measureCols[0]])).filter((v) => !isNaN(v));
+    const n = Math.max(2, Math.min(10, specs.subgroupSize));
+    const groups: number[][] = [];
+    for (let i = 0; i + n <= flat.length; i += n) groups.push(flat.slice(i, i + n));
+    return groups;
+  }, [spcSheet, mapping.measureCols, specs.subgroupSize]);
+
+  const hasData = subgroups.length > 0;
 
   const xbarR = useMemo(() => computeXbarR(subgroups), [subgroups]);
   const xbarS = useMemo(() => computeXbarS(subgroups), [subgroups]);
