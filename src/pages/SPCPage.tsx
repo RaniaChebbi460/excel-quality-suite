@@ -47,53 +47,22 @@ const SPCPage = () => {
       chartLabel: string;
       rule: string;
       ruleNumber: number | null;
-      pointIndex: number; // 0-based
+      pointIndex: number;
       value: number;
       type: "OOC" | "WE";
     }[] = [];
+    if (!xbarR || !xbarS || !imr) return list;
     xbarR.outOfControl.forEach((i) =>
-      list.push({
-        kind: "xbar-r",
-        chartLabel: "X̄ (Moyennes)",
-        rule: "Point hors limites de contrôle",
-        ruleNumber: null,
-        pointIndex: i,
-        value: xbarR.subgroupMeans[i],
-        type: "OOC",
-      })
+      list.push({ kind: "xbar-r", chartLabel: "X̄ (Moyennes)", rule: "Point hors limites de contrôle", ruleNumber: null, pointIndex: i, value: xbarR.subgroupMeans[i], type: "OOC" })
     );
     xbarR.westernElectric.forEach((r) =>
-      list.push({
-        kind: "xbar-r",
-        chartLabel: "X̄ (Moyennes)",
-        rule: r.description,
-        ruleNumber: r.rule,
-        pointIndex: r.index,
-        value: xbarR.subgroupMeans[r.index],
-        type: "WE",
-      })
+      list.push({ kind: "xbar-r", chartLabel: "X̄ (Moyennes)", rule: r.description, ruleNumber: r.rule, pointIndex: r.index, value: xbarR.subgroupMeans[r.index], type: "WE" })
     );
     xbarS.outOfControl.forEach((i) =>
-      list.push({
-        kind: "xbar-s",
-        chartLabel: "X̄ (X̄-S)",
-        rule: "Point hors limites",
-        ruleNumber: null,
-        pointIndex: i,
-        value: xbarS.subgroupMeans[i],
-        type: "OOC",
-      })
+      list.push({ kind: "xbar-s", chartLabel: "X̄ (X̄-S)", rule: "Point hors limites", ruleNumber: null, pointIndex: i, value: xbarS.subgroupMeans[i], type: "OOC" })
     );
     imr.outOfControl.forEach((i) =>
-      list.push({
-        kind: "i-mr",
-        chartLabel: "Individuals (I)",
-        rule: "Point hors limites",
-        ruleNumber: null,
-        pointIndex: i,
-        value: imr.values[i],
-        type: "OOC",
-      })
+      list.push({ kind: "i-mr", chartLabel: "Individuals (I)", rule: "Point hors limites", ruleNumber: null, pointIndex: i, value: imr.values[i], type: "OOC" })
     );
     return list;
   }, [xbarR, xbarS, imr]);
