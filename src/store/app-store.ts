@@ -244,19 +244,50 @@ export function mergeFiles(files: ParsedFile[], plan?: ImportPlan): ParsedSheet 
 export const appActions = {
   addFile: (f: ParsedFile) => {
     const files = [...store.get().files, f];
-    // Auto-enable all sheets of new file in plan
     const plan = { ...store.get().importPlan };
     f.sheets.forEach((_, si) => {
       const key = `${files.length - 1}::${si}`;
       if (plan.enabledSheets[key] === undefined) plan.enabledSheets[key] = true;
     });
     const merged = mergeFiles(files, plan);
+
+    // Auto-detect mapping across ALL sheets of all files.
+    const currentMapping = store.get().mapping;
+    const detections: { fileIdx: number; sheetIdx: number; kind: DetectedKind; map: any }[] = [];
+    files.forEach((file, fi) =>
+      file.sheets.forEach((s, si) => {
+        const d = detectSheet(s);
+        detections.push({ fileIdx: fi, sheetIdx: si, kind: d.kind, map: d.mapping });
+      })
+    );
+    const spcDet = detections.find((d) => d.kind === "spc");
+    const msaDet = detections.find((d) => d.kind === "msa");
+
+    const nextMapping: ColumnMapping = {
+      ...currentMapping,
+      // SPC fields from SPC sheet (only if user hasn't already mapped)
+      measureCols:
+        currentMapping.measureCols.length > 0
+          ? currentMapping.measureCols
+          : spcDet?.map.measureCols ?? msaDet?.map.measureCols ?? [],
+      // MSA fields from MSA sheet
+      partCol: currentMapping.partCol ?? msaDet?.map.partCol ?? null,
+      operatorCol: currentMapping.operatorCol ?? msaDet?.map.operatorCol ?? null,
+      trialCol: currentMapping.trialCol ?? msaDet?.map.trialCol ?? null,
+      valueCol: currentMapping.valueCol ?? msaDet?.map.valueCol ?? null,
+      validated: true, // auto-detected mapping is considered valid until user changes it
+    };
+
+    // Pick a sensible active sheet (prefer SPC sheet for the preview)
+    const preferred = spcDet ?? msaDet ?? { fileIdx: files.length - 1, sheetIdx: 0 };
+
     store.set({
       files,
-      activeFileIndex: files.length - 1,
-      activeSheetIndex: 0,
+      activeFileIndex: preferred.fileIdx,
+      activeSheetIndex: preferred.sheetIdx,
       mergedSheet: merged,
       importPlan: plan,
+      mapping: nextMapping,
     });
     persist();
   },
