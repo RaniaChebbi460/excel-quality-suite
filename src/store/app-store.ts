@@ -314,6 +314,17 @@ export const appActions = {
     if (s.files.length > 1 && s.mergedSheet) return s.mergedSheet;
     return appActions.getActiveSheet();
   },
+  // Find the sheet that best matches a given analysis kind (auto-detected).
+  getSheetForKind: (kind: "spc" | "msa"): ParsedSheet | null => {
+    const s = store.get();
+    for (const f of s.files) {
+      for (const sh of f.sheets) {
+        if (detectSheet(sh).kind === kind) return sh;
+      }
+    }
+    return null;
+  },
+  hasAnyData: (): boolean => store.get().files.length > 0,
   setSpecs: (patch: Partial<ProjectSpecs>) => {
     store.set({ specs: { ...store.get().specs, ...patch } });
     persist();
