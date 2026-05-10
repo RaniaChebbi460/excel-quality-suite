@@ -10,6 +10,7 @@ import { useAppStore, appActions, analyzeCompatibility } from "@/store/app-store
 import { CheckCircle2, AlertTriangle, Eye, Layers, Play, FileSpreadsheet, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { notificationActions } from "@/lib/notifications";
 
 const ImportPlanPage = () => {
   const files = useAppStore((s) => s.files);
@@ -55,6 +56,7 @@ const ImportPlanPage = () => {
     const v = aliasDraft[orig] ?? "";
     appActions.setColumnAlias(orig, v.trim());
     toast.success("Alias appliqué", { description: v ? `${orig} → ${v}` : `${orig} : alias supprimé` });
+    notificationActions.add({ type: "info", title: "Alias appliqué", message: v ? `${orig} → ${v}` : `${orig} : alias supprimé` });
   };
 
   return (

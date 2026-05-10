@@ -7,6 +7,7 @@ import { computeMSA, MSAEntry } from "@/lib/spc-engine";
 import { Label } from "@/components/ui/label";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MSAPage = () => {
   const msaSheet = useAppStore((s) => appActions.getSheetForKind("msa"));
@@ -50,19 +51,6 @@ const MSAPage = () => {
   const hasData = entries.length > 0;
   const msa = useMemo(() => (hasData ? computeMSA(entries) : null), [hasData, entries]);
 
-  useEffect(() => {
-    console.debug("[MSAPage] mapping state", {
-      hasMsaSheet: !!msaSheet,
-      headers: msaSheet?.headers,
-      colPart,
-      colOp,
-      colTrial,
-      colVal,
-      entriesCount: entries.length,
-      hasData,
-    });
-  }, [msaSheet, colPart, colOp, colTrial, colVal, entries.length, hasData]);
-
   if (!hasData || !msa) {
     return (
       <AppLayout title="MSA — Gage R&R" subtitle="Répétabilité & Reproductibilité (méthode moyenne & étendue)">
@@ -80,10 +68,19 @@ const MSAPage = () => {
               ].map((f) => (
                 <div key={f.label}>
                   <Label className="text-xs">{f.label}</Label>
-                  <select value={f.state} onChange={(e) => f.setter(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm">
-                    <option value="">— Sélectionner —</option>
-                    {msaSheet.headers.map((h) => <option key={h} value={h}>{h}</option>)}
-                  </select>
+                  <Select value={f.state || "__none"} onValueChange={(v) => f.setter(v === "__none" ? "" : v)}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="— Sélectionner —" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">— Sélectionner —</SelectItem>
+                      {msaSheet.headers.map((h) => (
+                        <SelectItem key={h} value={h}>
+                          {h}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               ))}
             </div>
@@ -124,10 +121,19 @@ const MSAPage = () => {
           ].map((f) => (
             <div key={f.label}>
               <Label className="text-xs">{f.label}</Label>
-              <select value={f.state} onChange={(e) => f.setter(e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm">
-                <option value="">— Sélectionner —</option>
-                {msaSheet!.headers.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
+              <Select value={f.state || "__none"} onValueChange={(v) => f.setter(v === "__none" ? "" : v)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="— Sélectionner —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">— Sélectionner —</SelectItem>
+                  {msaSheet!.headers.map((h) => (
+                    <SelectItem key={h} value={h}>
+                      {h}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           ))}
         </div>

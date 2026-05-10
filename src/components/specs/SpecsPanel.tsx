@@ -134,7 +134,7 @@ export const SpecsPanel = ({ compact = false }: { compact?: boolean }) => {
       )}
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Ces paramètres sont appliqués automatiquement à toutes les analyses et rapports. Sauvegardés localement.
+        Ces paramètres sont appliqués automatiquement à toutes les analyses et rapports. Sauvegardés dans Supabase.
       </p>
     </SectionCard>
   );

@@ -5,11 +5,14 @@ import { SectionCard } from "@/components/dashboard/SectionCard";
 import { Button } from "@/components/ui/button";
 import { useAppStore, appActions } from "@/store/app-store";
 import { parseExcelFile } from "@/lib/excel";
-import { Upload, FileSpreadsheet, Trash2, Eye, Wand2, Layers, CheckCircle2 } from "lucide-react";
+import { Upload, FileSpreadsheet, Trash2, Eye, Wand2, Layers, CheckCircle2, Play } from "lucide-react";
+import { DEMO_SUBGROUPS, DEMO_MSA } from "@/lib/demo-data";
 import { toast } from "sonner";
+import { notificationActions } from "@/lib/notifications";
 import { MappingWizard } from "@/components/wizard/MappingWizard";
 import { SpecsPanel } from "@/components/specs/SpecsPanel";
-import DetectionTest from "@/components/DetectionTest";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -28,37 +31,35 @@ const DataPage = () => {
   const mapping = useAppStore((s) => s.mapping);
   const [showMerged, setShowMerged] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const activeFile = activeFileIndex !== null ? files[activeFileIndex] : null;
   const activeSheet = activeFile && activeSheetIndex !== null ? activeFile.sheets[activeSheetIndex] : null;
   const displaySheet = showMerged && mergedSheet ? mergedSheet : activeSheet;
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.info("[DataPage] handleUpload called", { files: e.target.files?.length });
     const list = e.target.files;
-    if (!list) {
-      console.warn("[DataPage] handleUpload: aucun fichier sélectionné");
-      return;
-    }
-    console.info("[DataPage] selected files", Array.from(list).map((f) => f.name));
+    if (!list) return;
     let imported = 0;
     for (const f of Array.from(list)) {
       try {
         const parsed = await parseExcelFile(f);
-        console.info("[DataPage] parsed file", f.name, { sheetCount: parsed.sheets.length });
         appActions.addFile(parsed);
         imported++;
       } catch (err: any) {
         console.error("[DataPage] import error", f.name, err);
         toast.error("Erreur d'import", { description: err.message });
+        notificationActions.add({
+          type: "error",
+          title: `Erreur d'import : ${f.name}`,
+          message: err.message,
+        });
       }
     }
     if (imported > 0) {
       const det = (appActions as any)._lastDetection as
         | { dashboard: any; spcCard: any; msaRR: any; capability: any; uncertainty: any; spc: any; msa: any; unknown: boolean }
         | undefined;
-      console.info("[DataPage.handleUpload] detected summary", det);
-      console.info("[DataPage.handleUpload] msa sheet", appActions.getSheetForKind("msa"));
       const parts: string[] = [];
 
       if (det?.dashboard) parts.push("Tableau de bord");
@@ -75,6 +76,11 @@ const DataPage = () => {
 
       if (parts.length) {
         toast.success(`${imported} fichier(s) importé(s)`, { description: desc });
+        notificationActions.add({
+          type: "success",
+          title: `${imported} fichier(s) importé(s)`,
+          message: desc,
+        });
 
         // Auto-navigate to appropriate page based on detected type
         setTimeout(() => {
@@ -88,9 +94,50 @@ const DataPage = () => {
 
       } else {
         toast.warning(`${imported} fichier(s) importé(s)`, { description: desc });
+        notificationActions.add({
+          type: "warning",
+          title: `${imported} fichier(s) importé(s)`,
+          message: desc,
+        });
       }
     }
     if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const loadDemoData = () => {
+    const spcRows = DEMO_SUBGROUPS.map((g, i) => {
+      const row: Record<string, any> = { Subgroup: i + 1 };
+      g.forEach((v, j) => {
+        row[`M${j + 1}`] = v;
+      });
+      return row;
+    });
+    const spcSheet = {
+      name: "SPC_Demo",
+      headers: ["Subgroup", "M1", "M2", "M3", "M4", "M5"],
+      rows: spcRows,
+      matrix: [],
+    };
+    const spcFile = { name: "demo-spc.xlsx", sheets: [spcSheet], importedAt: new Date().toISOString() };
+
+    const msaSheet = {
+      name: "MSA_Demo",
+      headers: ["Part", "Operator", "Trial", "Measurement"],
+      rows: DEMO_MSA.map((e) => ({ Part: e.part, Operator: e.operator, Trial: e.trial, Measurement: e.value })),
+      matrix: [],
+    };
+    const msaFile = { name: "demo-msa.xlsx", sheets: [msaSheet], importedAt: new Date().toISOString() };
+
+    appActions.clearFiles();
+    appActions.addFile(spcFile);
+    appActions.addFile(msaFile);
+    appActions.setMapping({
+      measureCols: ["M1", "M2", "M3", "M4", "M5"],
+      validated: true,
+    });
+    appActions.setSpecs({ subgroupSize: 5 });
+    toast.success("Données de démonstration chargées", { description: "Fichiers SPC et MSA prêts pour test." });
+    notificationActions.add({ type: "info", title: "Données de démonstration chargées", message: "SPC + MSA prêts pour test." });
   };
 
   return (
@@ -98,10 +145,7 @@ const DataPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
         <SectionCard title="Importer un ou plusieurs fichiers" className="lg:col-span-2">
           <div
-            onClick={() => {
-              console.info("[DataPage] import drop area clicked");
-              inputRef.current?.click();
-            }}
+            onClick={() => inputRef.current?.click()}
             className="border-2 border-dashed border-border rounded-xl p-10 text-center cursor-pointer hover:border-primary hover:bg-accent/30 transition-colors"
           >
             <Upload className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
@@ -122,6 +166,10 @@ const DataPage = () => {
             <Button onClick={() => setWizardOpen(true)} variant="default" size="sm" className="gap-2">
               <Wand2 className="w-3.5 h-3.5" />
               Assistant de mappage
+            </Button>
+            <Button onClick={loadDemoData} variant="outline" size="sm" className="gap-2">
+              <Play className="w-3.5 h-3.5" />
+              Charger données de démo
             </Button>
             {files.length > 1 && (
               <Button
@@ -162,7 +210,7 @@ const DataPage = () => {
                     <div className="text-sm font-medium truncate">{f.name}</div>
                     <div className="text-xs text-muted-foreground">{f.sheets.length} feuille(s)</div>
                   </div>
-                  <Button size="sm" variant="ghost" onClick={() => { appActions.setActiveFile(i); setShowMerged(false); }} title="Ouvrir">
+                  <Button size="sm" variant="ghost" onClick={() => { appActions.setActiveFile(i); setShowMerged(false); setPreviewOpen(true); }} title="Ouvrir">
                     <Eye className="w-3.5 h-3.5" />
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => appActions.removeFile(i)} title="Supprimer">
@@ -186,19 +234,16 @@ const DataPage = () => {
         <SpecsPanel />
       </div>
 
-      <div className="mb-5">
-        <DetectionTest />
-      </div>
-
-      {displaySheet && (
-        <SectionCard
-          title={
-            showMerged && mergedSheet
-              ? `Fusion globale (${files.length} fichiers)`
-              : `Prévisualisation : ${activeFile?.name}`
-          }
-          actions={
-            !showMerged && activeFile ? (
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-3 pr-14 flex flex-row items-center justify-between space-y-0">
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5 text-primary" />
+              {showMerged && mergedSheet
+                ? `Fusion globale (${files.length} fichiers)`
+                : `Prévisualisation : ${activeFile?.name}`}
+            </DialogTitle>
+            {!showMerged && activeFile && (
               <Select value={String(activeSheetIndex)} onValueChange={(v) => appActions.setActiveSheet(Number(v))}>
                 <SelectTrigger className="w-48 h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -207,38 +252,41 @@ const DataPage = () => {
                   ))}
                 </SelectContent>
               </Select>
-            ) : null
-          }
-        >
-          <div className="overflow-x-auto max-h-[500px]">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-card">
-                <tr className="text-muted-foreground border-b border-border">
-                  <th className="px-3 py-2 text-left font-medium w-12">#</th>
-                  {displaySheet.headers.map((h, i) => (
-                    <th key={i} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {displaySheet.rows.slice(0, 200).map((r, i) => (
-                  <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
-                    <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
-                    {displaySheet.headers.map((h, j) => (
-                      <td key={j} className="px-3 py-1.5 tabular-nums">{r[h] ?? "-"}</td>
+            )}
+          </DialogHeader>
+          <ScrollArea className="max-h-[calc(85vh-80px)] px-6 pb-6">
+            {displaySheet ? (
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-card z-10">
+                  <tr className="text-muted-foreground border-b border-border">
+                    <th className="px-3 py-2 text-left font-medium w-12">#</th>
+                    {displaySheet.headers.map((h, i) => (
+                      <th key={i} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {displaySheet.rows.length > 200 && (
+                </thead>
+                <tbody>
+                  {displaySheet.rows.slice(0, 200).map((r, i) => (
+                    <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
+                      <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
+                      {displaySheet.headers.map((h, j) => (
+                        <td key={j} className="px-3 py-1.5 tabular-nums">{r[h] ?? "-"}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="text-sm text-muted-foreground text-center py-8">Aucune donnée à afficher</div>
+            )}
+            {displaySheet && displaySheet.rows.length > 200 && (
               <div className="text-xs text-muted-foreground text-center py-3">
                 Affichage des 200 premières lignes sur {displaySheet.rows.length}
               </div>
             )}
-          </div>
-        </SectionCard>
-      )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
 
       <MappingWizard open={wizardOpen} onOpenChange={setWizardOpen} />
     </AppLayout>
