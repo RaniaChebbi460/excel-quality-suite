@@ -16,6 +16,7 @@ import {
 } from "@/lib/spc-engine";
 import { DEMO_SUBGROUPS, DEMO_MSA } from "@/lib/demo-data";
 import { downloadXLSX } from "@/lib/excel";
+import { notificationActions } from "@/lib/notifications";
 import { ControlChart } from "@/components/charts/ControlChart";
 import {
   ComposedChart,
@@ -493,8 +494,10 @@ const ReportsPage = () => {
 
       doc.save(`rapport_${specs.projectName.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.pdf`);
       toast.success("Rapport PDF généré avec table des matières cliquable");
+      notificationActions.add({ type: "success", title: "Rapport PDF généré", message: "Table des matières cliquable incluse." });
     } catch (err: any) {
       toast.error("Erreur PDF", { description: err.message });
+      notificationActions.add({ type: "error", title: "Erreur PDF", message: err.message });
     } finally {
       setBusy(null);
     }
@@ -619,8 +622,10 @@ const ReportsPage = () => {
 
       downloadXLSX(`rapport_${specs.projectName.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`, sheets);
       toast.success("Export Excel multi-feuilles généré");
+      notificationActions.add({ type: "success", title: "Export Excel généré", message: "Fichier multi-feuilles prêt." });
     } catch (err: any) {
       toast.error("Erreur Excel", { description: err.message });
+      notificationActions.add({ type: "error", title: "Erreur Excel", message: err.message });
     } finally {
       setBusy(null);
     }

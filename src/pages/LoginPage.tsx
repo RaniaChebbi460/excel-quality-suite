@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { notificationActions } from "@/lib/notifications";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,13 +39,16 @@ const LoginPage = () => {
       if (mode === "signin") {
         await signInWithPassword({ email, password });
         toast.success("Connecté");
+        notificationActions.add({ type: "success", title: "Connecté", message: "Vous êtes maintenant connecté." });
       } else {
         await signUp({ email, password });
         toast.success("Compte créé", { description: "Vérifiez votre email si la confirmation est activée." });
+        notificationActions.add({ type: "info", title: "Compte créé", message: "Vérifiez votre email si la confirmation est activée." });
       }
       navigate(redirectTo, { replace: true });
     } catch (err: any) {
       toast.error("Erreur d'authentification", { description: err?.message ?? String(err) });
+      notificationActions.add({ type: "error", title: "Erreur d'authentification", message: err?.message ?? String(err) });
     } finally {
       setBusy(false);
     }

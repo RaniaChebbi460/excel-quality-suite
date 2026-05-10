@@ -7,9 +7,9 @@ import { useAppStore, appActions } from "@/store/app-store";
 import { parseExcelFile } from "@/lib/excel";
 import { Upload, FileSpreadsheet, Trash2, Eye, Wand2, Layers, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { notificationActions } from "@/lib/notifications";
 import { MappingWizard } from "@/components/wizard/MappingWizard";
 import { SpecsPanel } from "@/components/specs/SpecsPanel";
-import DetectionTest from "@/components/DetectionTest";
 import {
   Select,
   SelectContent,
@@ -51,6 +51,11 @@ const DataPage = () => {
       } catch (err: any) {
         console.error("[DataPage] import error", f.name, err);
         toast.error("Erreur d'import", { description: err.message });
+        notificationActions.add({
+          type: "error",
+          title: `Erreur d'import : ${f.name}`,
+          message: err.message,
+        });
       }
     }
     if (imported > 0) {
@@ -75,6 +80,11 @@ const DataPage = () => {
 
       if (parts.length) {
         toast.success(`${imported} fichier(s) importé(s)`, { description: desc });
+        notificationActions.add({
+          type: "success",
+          title: `${imported} fichier(s) importé(s)`,
+          message: desc,
+        });
 
         // Auto-navigate to appropriate page based on detected type
         setTimeout(() => {
@@ -88,6 +98,11 @@ const DataPage = () => {
 
       } else {
         toast.warning(`${imported} fichier(s) importé(s)`, { description: desc });
+        notificationActions.add({
+          type: "warning",
+          title: `${imported} fichier(s) importé(s)`,
+          message: desc,
+        });
       }
     }
     if (inputRef.current) inputRef.current.value = "";
@@ -184,10 +199,6 @@ const DataPage = () => {
 
       <div className="mb-5">
         <SpecsPanel />
-      </div>
-
-      <div className="mb-5">
-        <DetectionTest />
       </div>
 
       {displaySheet && (
