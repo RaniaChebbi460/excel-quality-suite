@@ -330,10 +330,6 @@ export const appActions = {
     });
     const merged = mergeFiles(files, plan);
 
-    console.groupCollapsed("[appActions.addFile] imported files", files.map((f) => f.name));
-    console.info("[appActions.addFile] currentMapping", store.get().mapping);
-    console.info("[appActions.addFile] enabled sheets", plan.enabledSheets);
-
     // Auto-detect mapping across ALL sheets of all files.
     const currentMapping = store.get().mapping;
     const detections: { fileIdx: number; sheetIdx: number; kind: DetectedKind; map: any; confidence: number }[] = [];
@@ -391,16 +387,6 @@ export const appActions = {
       validated: true, // auto-detected mapping is considered valid until user changes it
     };
 
-    console.info("[appActions.addFile] detections", detections);
-    console.info("[appActions.addFile] detected types", {
-      dashboard: dashboardDet,
-      spcCard: spcCardDet,
-      msaRR: msaRRDet,
-      capability: capabilityDet,
-      uncertainty: uncertaintyDet,
-      spc: spcDet,
-      msa: msaDet,
-    });
 
     // Expose the detection summary so callers (UI) can display feedback.
     (appActions as any)._lastDetection = {
@@ -418,9 +404,6 @@ export const appActions = {
     const preferredOrder = [msaRRDet, spcCardDet, dashboardDet, capabilityDet, uncertaintyDet, spcDet, msaDet];
     const preferred = preferredOrder.find(d => d !== null) ?? { fileIdx: files.length - 1, sheetIdx: 0 };
 
-    console.info("[appActions.addFile] preferred sheet", preferred);
-    console.info("[appActions.addFile] nextMapping", nextMapping);
-    console.groupEnd();
 
     store.set({
       files,
@@ -465,12 +448,10 @@ export const appActions = {
   // Find the sheet that best matches a given analysis kind (auto-detected).
   getSheetForKind: (kind: "spc" | "msa"): ParsedSheet | null => {
     const s = store.get();
-    console.info("[getSheetForKind] kind", kind, "fileCount", s.files.length);
     let fallbackSheet: ParsedSheet | null = null;
     for (const f of s.files) {
       for (const sh of f.sheets) {
         const detected = detectSheet(sh).kind;
-        console.info("[getSheetForKind] sheet", sh.name, "detected", detected);
         if (
           detected === kind ||
           (kind === "msa" && detected === "msa-rr") ||
@@ -487,12 +468,19 @@ export const appActions = {
         }
       }
     }
-    if (fallbackSheet) {
-      console.info("[getSheetForKind] fallback to mapped MSA sheet", fallbackSheet.name);
-      return fallbackSheet;
-    }
-    console.info("[getSheetForKind] no sheet found for kind", kind);
+    if (fallbackSheet) return fallbackSheet;
     return null;
+  },
+  clearFiles: () => {
+    store.set({
+      files: [],
+      activeFileIndex: null,
+      activeSheetIndex: null,
+      mergedSheet: null,
+      mapping: { ...DEFAULT_MAPPING },
+      importPlan: { ...DEFAULT_PLAN },
+    });
+    persist();
   },
   hasAnyData: (): boolean => store.get().files.length > 0,
   setSpecs: (patch: Partial<ProjectSpecs>) => {

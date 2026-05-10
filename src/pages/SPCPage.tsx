@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SectionCard } from "@/components/dashboard/SectionCard";
 import { ControlChart } from "@/components/charts/ControlChart";
 import { EmptyState } from "@/components/dashboard/EmptyState";
 import { useAppStore, appActions } from "@/store/app-store";
 import { computeXbarR, computeXbarS, computeIMR } from "@/lib/spc-engine";
+import { detectSheet } from "@/lib/auto-detect";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, CheckCircle2, ZoomIn } from "lucide-react";
@@ -13,31 +14,34 @@ import { Button } from "@/components/ui/button";
 type ChartKind = "xbar-r" | "xbar-s" | "i-mr";
 
 const SPCPage = () => {
-  const spcSheet = useAppStore(() => appActions.getSheetForKind("spc"));
+  const spcSheet = useAppStore((s) => {
+    let fallbackSheet = null;
+    for (const f of s.files) {
+      for (const sh of f.sheets) {
+        const detected = detectSheet(sh).kind;
+        if (detected === "spc-card") return sh;
+        if (!fallbackSheet && detected === "spc") fallbackSheet = sh;
+      }
+    }
+    return fallbackSheet;
+  });
   const mapping = useAppStore((s) => s.mapping);
   const specs = useAppStore((s) => s.specs);
 
   const [zoomTarget, setZoomTarget] = useState<{ kind: ChartKind; index: number } | null>(null);
   const xbarRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    console.info("[SPCPage] render state", {
-      sheetName: spcSheet?.name,
-      headers: spcSheet?.headers,
-      measureCols: mapping.measureCols,
-      sheetRows: spcSheet?.rows.length,
-      subgroupSize: specs.subgroupSize,
-    });
-  }, [spcSheet, mapping.measureCols, specs.subgroupSize]);
-
   const subgroups: number[][] = useMemo(() => {
-    if (!spcSheet || mapping.measureCols.length === 0) return [];
-    if (mapping.measureCols.length >= 2) {
+    if (!spcSheet) return [];
+    const detectedMeasureCols = (detectSheet(spcSheet).mapping.measureCols ?? []) as string[];
+    const measureCols = mapping.measureCols.length > 0 ? mapping.measureCols : detectedMeasureCols;
+    if (measureCols.length === 0) return [];
+    if (measureCols.length >= 2) {
       return spcSheet.rows
-        .map((r) => mapping.measureCols.map((c) => Number(r[c])))
+        .map((r) => measureCols.map((c) => Number(r[c])))
         .filter((row) => row.every((v) => !isNaN(v)));
     }
-    const flat = spcSheet.rows.map((r) => Number(r[mapping.measureCols[0]])).filter((v) => !isNaN(v));
+    const flat = spcSheet.rows.map((r) => Number(r[measureCols[0]])).filter((v) => !isNaN(v));
     const n = Math.max(2, Math.min(10, specs.subgroupSize));
     const groups: number[][] = [];
     for (let i = 0; i + n <= flat.length; i += n) groups.push(flat.slice(i, i + n));

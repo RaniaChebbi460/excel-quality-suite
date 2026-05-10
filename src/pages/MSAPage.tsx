@@ -51,19 +51,6 @@ const MSAPage = () => {
   const hasData = entries.length > 0;
   const msa = useMemo(() => (hasData ? computeMSA(entries) : null), [hasData, entries]);
 
-  useEffect(() => {
-    console.debug("[MSAPage] mapping state", {
-      hasMsaSheet: !!msaSheet,
-      headers: msaSheet?.headers,
-      colPart,
-      colOp,
-      colTrial,
-      colVal,
-      entriesCount: entries.length,
-      hasData,
-    });
-  }, [msaSheet, colPart, colOp, colTrial, colVal, entries.length, hasData]);
-
   if (!hasData || !msa) {
     return (
       <AppLayout title="MSA — Gage R&R" subtitle="Répétabilité & Reproductibilité (méthode moyenne & étendue)">
