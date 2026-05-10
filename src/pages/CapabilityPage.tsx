@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { SpecsPanel } from "@/components/specs/SpecsPanel";
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const CapabilityPage = () => {
   const spcSheet = useAppStore(() => appActions.getSheetForKind("spc"));
@@ -126,13 +127,18 @@ const CapabilityPage = () => {
             Mappage actif : <strong className="text-foreground">{mapping.measureCols.join(", ") || "—"}</strong>
           </div>
           <Label className="text-xs">Colonne analysée</Label>
-          <select
-            value={active.col}
-            onChange={(e) => setSelectedCol(e.target.value || null)}
-            className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm"
-          >
-            {columns.map((h) => <option key={h} value={h}>{h}</option>)}
-          </select>
+          <Select value={active.col} onValueChange={(v) => setSelectedCol(v || null)}>
+            <SelectTrigger className="mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {columns.map((h) => (
+                <SelectItem key={h} value={h}>
+                  {h}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <div className="mt-3 text-xs text-muted-foreground">N (mesures) : <strong className="text-foreground">{values.length}</strong></div>
           <div className="mt-1 text-xs text-muted-foreground">
             Spec utilisée : LSL={eff.lsl} · Cible={eff.target} · USL={eff.usl}

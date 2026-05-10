@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const UncertaintyPage = () => {
   const spcSheet = useAppStore(() => appActions.getSheetForKind("spc"));
@@ -55,10 +56,19 @@ const UncertaintyPage = () => {
           {sheet && (
             <div className="mb-3">
               <Label className="text-xs">Colonne</Label>
-              <select value={overrideCol ?? ""} onChange={(e) => setOverrideCol(e.target.value || null)} className="w-full mt-1 px-3 py-2 rounded-md border border-input bg-background text-sm">
-                <option value="">— Démo —</option>
-                {sheet.headers.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
+              <Select value={overrideCol ?? "__none"} onValueChange={(v) => setOverrideCol(v === "__none" ? null : v)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="— Démo —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">— Démo —</SelectItem>
+                  {sheet.headers.map((h) => (
+                    <SelectItem key={h} value={h}>
+                      {h}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
           <div className="space-y-2 text-sm">
@@ -87,11 +97,19 @@ const UncertaintyPage = () => {
                 <tr key={i} className="border-b border-border/50">
                   <td className="py-1.5"><Input value={c.name} onChange={(e) => updateComponent(i, { name: e.target.value })} className="h-7 text-xs" /></td>
                   <td className="py-1.5">
-                    <select value={c.distribution} onChange={(e) => updateComponent(i, { distribution: e.target.value as any })} className="h-7 text-xs px-2 rounded-md border border-input bg-background">
-                      <option value="normal">Normale</option>
-                      <option value="uniform">Uniforme</option>
-                      <option value="triangular">Triangulaire</option>
-                    </select>
+                    <Select
+                      value={c.distribution}
+                      onValueChange={(v) => updateComponent(i, { distribution: v as any })}
+                    >
+                      <SelectTrigger className="h-7 text-xs px-2">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="normal">Normale</SelectItem>
+                        <SelectItem value="uniform">Uniforme</SelectItem>
+                        <SelectItem value="triangular">Triangulaire</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="py-1.5"><Input type="number" step="0.0001" value={c.value} onChange={(e) => updateComponent(i, { value: Number(e.target.value) })} className="h-7 text-xs text-right" /></td>
                   <td className="py-1.5"><Button size="sm" variant="ghost" onClick={() => removeComponent(i)}><Trash2 className="w-3 h-3 text-destructive" /></Button></td>

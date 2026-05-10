@@ -1,6 +1,7 @@
 import type { ParsedFile, ParsedSheet } from "@/lib/excel";
 import { useSyncExternalStore } from "react";
 import { detectSheet, type DetectedKind } from "@/lib/auto-detect";
+import { supabase } from "@/lib/supabase";
 
 type Listener = () => void;
 
@@ -101,6 +102,59 @@ const DEFAULT_PLAN: ImportPlan = {
 
 const STORAGE_KEY = "spc-app-state-v3";
 
+const DB_TABLE = "app_state";
+
+let currentUserId: string | null = null;
+let persistTimer: number | null = null;
+
+function scheduleDbPersist() {
+  if (!currentUserId) return;
+  if (persistTimer !== null) window.clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    void persistToDb();
+  }, 800);
+}
+
+async function persistToDb() {
+  if (!currentUserId) return;
+  const s = store.get();
+  const payload = {
+    files: s.files,
+    activeFileIndex: s.activeFileIndex,
+    activeSheetIndex: s.activeSheetIndex,
+    specs: s.specs,
+    mapping: s.mapping,
+    perColumnSpecs: s.perColumnSpecs,
+    importPlan: s.importPlan,
+  };
+
+  const { error } = await supabase
+    .from(DB_TABLE)
+    .upsert({ user_id: currentUserId, state: payload, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+
+  if (error) {
+    console.error("[app-store] persistToDb error", error);
+  }
+}
+
+async function loadFromDb(userId: string): Promise<Partial<AppState> | null> {
+  const { data, error } = await supabase
+    .from(DB_TABLE)
+    .select("state")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[app-store] loadFromDb error", error);
+    return null;
+  }
+
+  const state = (data as any)?.state as Partial<AppState> | undefined;
+  if (!state) return null;
+  return state;
+}
+
 function loadPersisted(): Partial<AppState> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -143,6 +197,8 @@ function persist() {
       })
     );
   } catch {}
+
+  scheduleDbPersist();
 }
 
 export function useAppStore<S>(selector: (s: AppState) => S): S {
@@ -242,6 +298,29 @@ export function mergeFiles(files: ParsedFile[], plan?: ImportPlan): ParsedSheet 
 }
 
 export const appActions = {
+  setCurrentUser: (userId: string | null) => {
+    currentUserId = userId;
+  },
+  loadPersistedForUser: async (userId: string) => {
+    currentUserId = userId;
+    const dbState = await loadFromDb(userId);
+    if (!dbState) return;
+
+    const files = (dbState.files ?? []) as ParsedFile[];
+    const importPlan = (dbState.importPlan ?? store.get().importPlan) as ImportPlan;
+    const merged = mergeFiles(files, importPlan);
+
+    store.set({
+      files,
+      activeFileIndex: (dbState.activeFileIndex ?? (files.length ? 0 : null)) as number | null,
+      activeSheetIndex: (dbState.activeSheetIndex ?? (files.length ? 0 : null)) as number | null,
+      specs: (dbState.specs ?? store.get().specs) as ProjectSpecs,
+      mapping: (dbState.mapping ?? store.get().mapping) as ColumnMapping,
+      perColumnSpecs: (dbState.perColumnSpecs ?? store.get().perColumnSpecs) as PerColumnSpecs,
+      importPlan,
+      mergedSheet: merged,
+    });
+  },
   addFile: (f: ParsedFile) => {
     const files = [...store.get().files, f];
     const plan = { ...store.get().importPlan };
@@ -363,9 +442,16 @@ export const appActions = {
       activeSheetIndex: files.length ? 0 : null,
       mergedSheet: merged,
     });
+    persist();
   },
-  setActiveFile: (idx: number) => store.set({ activeFileIndex: idx, activeSheetIndex: 0 }),
-  setActiveSheet: (idx: number) => store.set({ activeSheetIndex: idx }),
+  setActiveFile: (idx: number) => {
+    store.set({ activeFileIndex: idx, activeSheetIndex: 0 });
+    persist();
+  },
+  setActiveSheet: (idx: number) => {
+    store.set({ activeSheetIndex: idx });
+    persist();
+  },
   getActiveSheet: (): ParsedSheet | null => {
     const s = store.get();
     if (s.activeFileIndex === null || s.activeSheetIndex === null) return null;
@@ -385,7 +471,12 @@ export const appActions = {
       for (const sh of f.sheets) {
         const detected = detectSheet(sh).kind;
         console.info("[getSheetForKind] sheet", sh.name, "detected", detected);
-        if (detected === kind || (kind === "msa" && detected === "msa-rr")) return sh;
+        if (
+          detected === kind ||
+          (kind === "msa" && detected === "msa-rr") ||
+          (kind === "spc" && detected === "spc-card")
+        )
+          return sh;
         if (kind === "msa" && !fallbackSheet && s.mapping.partCol && s.mapping.operatorCol) {
           const hasPart = sh.headers.includes(s.mapping.partCol);
           const hasOperator = sh.headers.includes(s.mapping.operatorCol);
@@ -467,5 +558,6 @@ export const appActions = {
   rebuildMerge: () => {
     const merged = mergeFiles(store.get().files, store.get().importPlan);
     store.set({ mergedSheet: merged });
+    persist();
   },
 };
